@@ -1,14 +1,4 @@
 ---
-on:
-  workflow_dispatch:
-  pull_request:
-    types: [labeled]
-
-permissions:
-  contents: read
-  issues: read
-  pull-requests: read
-
 engine: claude
 
 safe-outputs:
