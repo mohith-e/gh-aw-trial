@@ -2,7 +2,7 @@
 
 Reusable [GitHub Agentic Workflows (gh-aw)](https://github.github.com/gh-aw/) for automating the full software development lifecycle with Claude-powered agents.
 
-## Workflow Pipeline
+## Feature Development Pipeline
 
 ```mermaid
 flowchart TD
@@ -35,9 +35,32 @@ flowchart TD
     style L fill:#00b894,color:#fff
 ```
 
+## Auto-Remediation Pipeline
+
+```mermaid
+flowchart LR
+    EL["Elastic Logs"] -->|"scheduled<br/>hourly"| AR["Auto-Remediation<br/>Agent discovers errors"]
+    AR -->|"triage +<br/>root cause"| T["Error Analysis<br/>Severity, category,<br/>suggested fix"]
+    T -->|"creates issue<br/>per error"| I["GitHub Issue<br/>with root cause"]
+    T -->|"implements fix<br/>per error"| PR["Pull Request<br/>with code fix"]
+    PR --> R{"Human Review"}
+    R -->|"approve"| M["Merge"]
+    R -->|"request changes"| PR
+
+    style EL fill:#e17055,color:#fff
+    style AR fill:#6c5ce7,color:#fff
+    style T fill:#6c5ce7,color:#fff
+    style I fill:#00b894,color:#fff
+    style PR fill:#00b894,color:#fff
+    style R fill:#fdcb6e,color:#333
+    style M fill:#00b894,color:#fff
+```
+
 ## Shared Workflows
 
 These workflows are project-agnostic and can be synced into any repo:
+
+### Feature Development
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
@@ -47,7 +70,23 @@ These workflows are project-agnostic and can be synced into any repo:
 | `mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
 | `validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
 
+### Operations
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
+
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
+
+### Auto-Remediation Setup
+
+The auto-remediation workflow requires additional configuration:
+
+| Type | Name | Description |
+|------|------|-------------|
+| Variable | `SERVICE_NAME` | Service name to search errors for in Elastic |
+| Variable | `ELASTIC_MCP_URL` | Elastic MCP server endpoint URL |
+| Secret | `ELASTIC_MCP_API_KEY` | Elastic API key for authentication |
 
 ## Usage
 

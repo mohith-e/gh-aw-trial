@@ -16,6 +16,7 @@ SHARED_WORKFLOWS=(
   skill-selection
   mcp-selection
   validation
+  auto-remediation
 )
 
 echo "Syncing shared workflows from ${SHARED_REPO}..."
