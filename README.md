@@ -2,6 +2,8 @@
 
 Reusable [GitHub Agentic Workflows (gh-aw)](https://github.github.com/gh-aw/) for automating the full software development lifecycle with Claude-powered agents.
 
+Consumer repos pull these workflows in via [remote imports](https://github.github.com/gh-aw/reference/imports/#remote-repository-imports) — no file copying or sync scripts needed.
+
 ## Feature Development Pipeline
 
 ```mermaid
@@ -58,29 +60,110 @@ flowchart LR
 
 ## Shared Workflows
 
-These workflows are project-agnostic and can be synced into any repo:
+These workflows are project-agnostic and designed to be imported into any repo:
 
 ### Feature Development
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
-| `decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
-| `skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
-| `mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
-| `validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
+| Workflow | Consumer Trigger | Purpose |
+|----------|-----------------|---------|
+| `workflows/prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
+| `workflows/decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
+| `workflows/skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
+| `workflows/mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
+| `workflows/validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
 
 ### Operations
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
+| Workflow | Consumer Trigger | Purpose |
+|----------|-----------------|---------|
+| `workflows/auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 
-### Auto-Remediation Setup
+## Usage
 
-The auto-remediation workflow requires additional configuration:
+### How imports work
+
+Consumer repos create thin workflow stubs in `.github/workflows/` that declare triggers and permissions, then import shared logic from this repo. The `gh aw compile` command resolves imports, caches them locally, and generates the final workflow files.
+
+See the [gh-aw imports reference](https://github.github.com/gh-aw/reference/imports/#remote-repository-imports) for full details.
+
+### New project
+
+Use [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) to scaffold a new repo (workflows are pre-configured with imports):
+
+```bash
+gh repo create RealPage/my-project --template RealPage/agentic-workflow-template --private
+cd my-project
+gh aw compile
+```
+
+### Existing project
+
+Copy the example stubs from `examples/` into your repo's `.github/workflows/` directory. Each stub declares the trigger and permissions, then imports the shared workflow:
+
+```bash
+mkdir -p .github/workflows
+```
+
+For example, to add PRD generation, create `.github/workflows/prd-generation.md`:
+
+```yaml
+---
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: read
+
+imports:
+  - RealPage/gh-aw-shared-workflows/workflows/prd-generation.md@v0.1.0
+---
+```
+
+Then compile and commit:
+
+```bash
+gh aw compile
+git add .github/
+git commit -m "Add agentic development workflows"
+```
+
+See `examples/` for stubs for every workflow.
+
+### Updating to a new version
+
+When this repo publishes a new release, bump the version ref in your stubs:
+
+```yaml
+imports:
+  - RealPage/gh-aw-shared-workflows/workflows/prd-generation.md@v0.2.0
+```
+
+Then recompile:
+
+```bash
+gh aw compile
+git add .github/
+git commit -m "Update shared workflows to v0.2.0"
+```
+
+You can also pin to a branch (`@main`) during development or a commit SHA for immutable references.
+
+## Consumer Prerequisites
+
+Workflows assume the following exist in the consumer repo:
+
+| Requirement | Used by | Description |
+|-------------|---------|-------------|
+| `CLAUDE.md` | All workflows | Project context, tech stack, and conventions |
+| `docs/prds/templates/prd-template.md` | `prd-generation` | PRD template structure (see `docs/` in this repo for a reference copy) |
+| `.github/workflows/implementation.md` | `mcp-selection` | Project-specific implementation workflow that MCP selection configures |
+
+### Auto-remediation setup
 
 | Type | Name | Description |
 |------|------|-------------|
@@ -88,52 +171,28 @@ The auto-remediation workflow requires additional configuration:
 | Variable | `ELASTIC_MCP_URL` | Elastic MCP server endpoint URL |
 | Secret | `ELASTIC_MCP_API_KEY` | Elastic API key for authentication |
 
-## Usage
+## Versioning
 
-### New Project
+This repo uses semver tags for stable releases:
 
-Use [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) to scaffold a new repo, then sync:
+- **Patch** (`v0.1.1`) — bug fixes to workflow instructions
+- **Minor** (`v0.2.0`) — new workflows or non-breaking enhancements
+- **Major** (`v1.0.0`) — stable rollout release
 
-```bash
-gh repo create RealPage/my-project --template RealPage/agentic-workflow-template --private
-cd my-project
-./scripts/sync-workflows.sh
-gh aw compile
-```
+Pin to a specific version in production (e.g., `@v0.1.0`). Use `@main` only during development.
 
-### Existing Project
+## Migration from sync script
 
-```bash
-# Download the sync script
-mkdir -p scripts
-gh api repos/RealPage/gh-aw-shared-workflows/contents/scripts/sync-workflows.sh \
-  --jq '.content' | base64 -d > scripts/sync-workflows.sh
-chmod +x scripts/sync-workflows.sh
+If your project previously used `sync-workflows.sh` to copy workflows:
 
-# Pull all shared workflows
-./scripts/sync-workflows.sh
-
-# Create your project-specific implementation.md
-# (see template repo for example)
-
-# Compile and commit
-gh aw compile
-git add .github/workflows/ scripts/
-git commit -m "Add agentic development workflows"
-```
-
-### Staying in Sync
-
-Projects created from the template include a GitHub Actions workflow that auto-syncs weekly and opens a PR if workflows have changed. You can also sync manually:
-
-```bash
-./scripts/sync-workflows.sh
-gh aw compile
-```
+1. For each workflow in `.github/workflows/`, replace the full file content with a thin import stub (see `examples/`)
+2. Delete `scripts/sync-workflows.sh` from your repo
+3. Remove any auto-sync GitHub Actions workflow (e.g., weekly sync cron)
+4. Run `gh aw compile` and commit the changes
 
 ## Contributing
 
 1. Create a branch in this repo
 2. Edit the workflow under `workflows/`
-3. Test your changes by copying the workflow into a project and running `gh aw compile` + `gh aw run <workflow>`
-4. Open a PR — once merged, all synced projects will pick up the change on their next sync
+3. Test by pointing a consumer stub at your branch: `@my-branch`
+4. Open a PR — once merged and tagged, all consumers can bump their version ref

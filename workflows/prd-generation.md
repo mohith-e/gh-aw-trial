@@ -1,13 +1,4 @@
 ---
-on:
-  workflow_dispatch:
-  issues:
-    types: [opened, labeled]
-
-permissions:
-  contents: read
-  issues: read
-
 engine: claude
 
 safe-outputs:
