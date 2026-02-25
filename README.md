@@ -100,13 +100,36 @@ gh aw compile
 
 ### Existing project
 
-Copy the example stubs from `examples/` into your repo's `.github/workflows/` directory. Each stub declares the trigger and permissions, then imports the shared workflow:
+#### Step 1: Add prerequisites
+
+Make sure these files exist in your repo (skip any you already have):
+
+```bash
+# Project context file — describes your tech stack, conventions, and key paths
+touch CLAUDE.md
+
+# PRD template — used by the prd-generation workflow
+mkdir -p docs/prds/templates
+curl -sL "https://raw.githubusercontent.com/RealPage/gh-aw-shared-workflows/v0.1.0/docs/prds/templates/prd-template.md" \
+  -o docs/prds/templates/prd-template.md
+```
+
+> Your `CLAUDE.md` should describe the project's tech stack, directory structure, coding conventions, and anything an AI agent needs to know to work in the codebase.
+
+#### Step 2: Pull workflow stubs
+
+This downloads all the example consumer stubs into `.github/workflows/`:
 
 ```bash
 mkdir -p .github/workflows
+
+for wf in prd-generation decomposition skill-selection mcp-selection validation auto-remediation; do
+  curl -sL "https://raw.githubusercontent.com/RealPage/gh-aw-shared-workflows/v0.1.0/examples/${wf}.md" \
+    -o ".github/workflows/${wf}.md"
+done
 ```
 
-For example, to add PRD generation, create `.github/workflows/prd-generation.md`:
+Each stub is a thin wrapper that declares triggers and permissions, then imports the shared logic:
 
 ```yaml
 ---
@@ -124,15 +147,18 @@ imports:
 ---
 ```
 
-Then compile and commit:
+> **Pick and choose:** You don't need all 6 workflows. Only download the ones relevant to your project. See the [Shared Workflows](#shared-workflows) table for what each one does.
+
+#### Step 3: Compile and commit
 
 ```bash
 gh aw compile
-git add .github/
+git add .github/ docs/
 git commit -m "Add agentic development workflows"
+git push
 ```
 
-See `examples/` for stubs for every workflow.
+That's it. Your repo now has agentic workflows powered by shared imports.
 
 ### Updating to a new version
 
