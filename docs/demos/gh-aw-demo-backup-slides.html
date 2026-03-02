@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gh-aw Demo — Backup Slides</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-subtle: #1f6feb22;
+    --green: #3fb950;
+    --green-subtle: #23863622;
+    --orange: #d29922;
+    --orange-subtle: #d2992222;
+    --red: #f85149;
+    --purple: #bc8cff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    z-index: 100;
+  }
+  .nav-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .nav-title span { color: var(--accent); }
+  .nav-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .nav-controls button {
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s;
+  }
+  .nav-controls button:hover { background: var(--accent); color: #fff; }
+  .nav-controls button:disabled { opacity: 0.3; cursor: default; }
+  .nav-controls button:disabled:hover { background: var(--border); color: var(--text); }
+  .slide-counter {
+    font-size: 13px;
+    color: var(--text-muted);
+    min-width: 60px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Slide index sidebar */
+  .sidebar {
+    position: fixed;
+    top: 48px;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-item {
+    padding: 10px 20px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.15s;
+    line-height: 1.4;
+  }
+  .sidebar-item:hover { background: var(--accent-subtle); color: var(--text); }
+  .sidebar-item.active {
+    border-left-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-subtle);
+  }
+
+  /* Slide container */
+  .slides-wrapper {
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+  }
+  .slide {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 48px 80px;
+    overflow-y: auto;
+    opacity: 0;
+    transform: translateX(40px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+  }
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+  .slide.exit-left {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+
+  /* Slide content */
+  .slide-number {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .slide h1 {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 32px;
+    line-height: 1.2;
+  }
+  .slide h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 28px 0 14px;
+    color: var(--text);
+  }
+  .slide h2:first-of-type { margin-top: 0; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 15px;
+  }
+  th {
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--border);
+  }
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.5;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #ffffff06; }
+
+  /* Lists */
+  ul, ol {
+    margin: 12px 0;
+    padding-left: 24px;
+  }
+  li {
+    margin: 8px 0;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  li strong { color: var(--accent); }
+
+  /* Blockquote / sound bite */
+  blockquote {
+    margin: 24px 0;
+    padding: 20px 24px;
+    background: var(--accent-subtle);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    font-size: 17px;
+    line-height: 1.6;
+    font-style: italic;
+    color: var(--text);
+  }
+
+  /* Code blocks */
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: auto;
+    color: var(--text);
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: var(--surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+
+  /* Diagram box */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin: 16px 0;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.8;
+    white-space: pre;
+  }
+
+  /* Two-column layout */
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin: 16px 0;
+  }
+  .column {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .column h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--accent);
+  }
+
+  /* Badge / tag */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge-green { background: var(--green-subtle); color: var(--green); border: 1px solid var(--green); }
+  .badge-orange { background: var(--orange-subtle); color: var(--orange); border: 1px solid var(--orange); }
+  .badge-red { background: #f8514922; color: var(--red); border: 1px solid var(--red); }
+
+  /* Stat cards */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Section label */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  /* Layer diagram */
+  .layer-stack {
+    margin: 16px 0;
+  }
+  .layer {
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    margin-bottom: -1px;
+  }
+  .layer:first-child { border-radius: 8px 8px 0 0; }
+  .layer:last-child { border-radius: 0 0 8px 8px; }
+  .layer-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .layer-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .layer-1 { background: #f8514911; border-color: #f8514944; }
+  .layer-1 .layer-title { color: var(--red); }
+  .layer-2 { background: #d2992211; border-color: #d2992244; }
+  .layer-2 .layer-title { color: var(--orange); }
+  .layer-3 { background: #3fb95011; border-color: #3fb95044; }
+  .layer-3 .layer-title { color: var(--green); }
+
+  /* Timeline */
+  .timeline {
+    margin: 16px 0;
+    padding-left: 0;
+    list-style: none;
+  }
+  .timeline li {
+    position: relative;
+    padding: 12px 0 12px 32px;
+    border-left: 2px solid var(--border);
+    margin: 0;
+  }
+  .timeline li::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 16px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+  }
+  .timeline li:last-child { border-left-color: transparent; }
+  .timeline .step-title { font-weight: 600; color: var(--text); }
+  .timeline .step-detail { font-size: 14px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Keyboard hints */
+  .keyboard-hint {
+    position: fixed;
+    bottom: 16px;
+    right: 24px;
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  kbd {
+    background: var(--border);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-title"><span>gh-aw</span> &mdash; Backup Slides for Q&amp;A</div>
+  <div class="nav-controls">
+    <button onclick="toggleSidebar()" title="Toggle slide index">Index</button>
+    <button id="prevBtn" onclick="prevSlide()">&larr; Prev</button>
+    <span class="slide-counter" id="counter">1 / 10</span>
+    <button id="nextBtn" onclick="nextSlide()">Next &rarr;</button>
+  </div>
+</nav>
+
+<aside class="sidebar" id="sidebar"></aside>
+
+<div class="slides-wrapper">
+
+  <!-- SLIDE 1 -->
+  <div class="slide active" data-title="But It's Technical Preview...">
+    <div class="slide-number">Backup Slide 1</div>
+    <h1>"But It's Technical Preview..."</h1>
+
+    <h2>The Label vs. The Reality</h2>
+    <table>
+      <thead>
+        <tr><th>What "tech preview" implies</th><th>What's actually happening</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Might disappear</td><td>275 releases (~daily shipping)</td></tr>
+        <tr><td>Unstable / broken</td><td>100+ workflows running in prod on gh-aw's own repo</td></tr>
+        <tr><td>Small experiment</td><td>3,700+ stars, 268 forks, MIT licensed</td></tr>
+        <tr><td>Unknown team</td><td>Peli de Halleux (Microsoft Research), Don Syme (F# creator), GitHub Next</td></tr>
+        <tr><td>No production use</td><td>514 merged PRs from Plan Command alone (67% merge rate)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>What "tech preview" actually means here</h2>
+    <ul>
+      <li>API surface may evolve (frontmatter schema, CLI flags)</li>
+      <li>Not yet covered by GitHub's SLA/support contracts</li>
+      <li>Feature set still expanding</li>
+    </ul>
+
+    <h2>Why that's acceptable risk</h2>
+    <ul>
+      <li><strong>Version pinning</strong> &mdash; imports lock to <code>@v0.1.0</code>. Breaking changes don't propagate until you choose to upgrade.</li>
+      <li><strong>No proprietary runtime</strong> &mdash; workflows compile to standard GitHub Actions YAML. Worst case: stop compiling, keep running what you have.</li>
+      <li><strong>MIT licensed</strong> &mdash; you own the code. No vendor can pull it away.</li>
+      <li><strong>Markdown files in Git</strong> &mdash; your workflows are just files in your repo. Nothing to migrate off of.</li>
+    </ul>
+
+    <blockquote>"Tech preview means the API might change. It doesn't mean this might disappear. GitHub is dogfooding this on their own codebase with 100+ workflows. When was the last time you saw a 'tech preview' with 275 releases and daily production use?"</blockquote>
+  </div>
+
+  <!-- SLIDE 2 -->
+  <div class="slide" data-title="What's Your Rollback Story?">
+    <div class="slide-number">Backup Slide 2</div>
+    <h1>"What's Your Rollback Story?"</h1>
+
+    <div class="columns">
+      <div class="column">
+        <h3>If gh-aw disappears tomorrow</h3>
+        <ol>
+          <li>Your <code>.lock.yml</code> files are standard GitHub Actions YAML &mdash; they keep running</li>
+          <li>Your workflow <code>.md</code> files are documentation of what the agent does &mdash; still useful</li>
+          <li>Your CLAUDE.md, PRD templates, skills &mdash; all plain files in your repo, engine-agnostic</li>
+          <li>Zero infrastructure to decommission (no servers, no databases, no SaaS to cancel)</li>
+        </ol>
+      </div>
+      <div class="column">
+        <h3>If a breaking change lands</h3>
+        <ol>
+          <li>Imports are version-pinned: <code>@v0.1.0</code> &mdash; nothing changes until you bump</li>
+          <li><code>gh aw compile</code> runs locally &mdash; you see the diff before pushing</li>
+          <li>Lockfiles are committed to Git &mdash; you can <code>git diff</code> any compilation change</li>
+          <li>Standard PR review process applies to workflow changes</li>
+        </ol>
+      </div>
+    </div>
+
+    <blockquote>"The rollback story is: stop running <code>gh aw compile</code>. Your existing compiled workflows keep running as normal GitHub Actions. There's nothing to unwind."</blockquote>
+  </div>
+
+  <!-- SLIDE 3 -->
+  <div class="slide" data-title="How Do We Know GitHub Is Serious?">
+    <div class="slide-number">Backup Slide 3</div>
+    <h1>"How Do We Know GitHub Is Serious About This?"</h1>
+
+    <h2>Investment Signals</h2>
+    <table>
+      <thead>
+        <tr><th>Signal</th><th>Evidence</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Team</strong></td><td>GitHub Next + Microsoft Research (not a hackathon project)</td></tr>
+        <tr><td><strong>People</strong></td><td>Peli de Halleux (GenAI research lead), Don Syme (created F#)</td></tr>
+        <tr><td><strong>Velocity</strong></td><td>275 releases in ~2 months</td></tr>
+        <tr><td><strong>Dogfooding</strong></td><td>100+ workflows on their own repo, 19-part blog series documenting results</td></tr>
+        <tr><td><strong>Ecosystem</strong></td><td>Firewall (AWF), MCP Gateway, Agentics sample pack (50+ workflows), starter template</td></tr>
+        <tr><td><strong>Blog coverage</strong></td><td>Official GitHub blog announcement, GitHub Changelog entry</td></tr>
+        <tr><td><strong>Community</strong></td><td>3,700+ stars, 268 forks, active open-source development</td></tr>
+        <tr><td><strong>Architecture</strong></td><td>Built on GitHub Actions &mdash; extending a core platform, not bolting on a side feature</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Strategic Context</h2>
+    <ul>
+      <li>GitHub Copilot moved from code completion &rarr; Workspace &rarr; Agents. gh-aw is the workflow automation layer.</li>
+      <li>Microsoft is betting on AI-native development. gh-aw is how that bet manifests in CI/CD.</li>
+      <li>Built on Actions &mdash; GitHub's most widely adopted automation platform. They're extending it, not replacing it.</li>
+    </ul>
+
+    <blockquote>"When the person who created F# and the head of GenAI research at Microsoft are shipping daily releases, this isn't a tech preview that's going to quietly sunset."</blockquote>
+  </div>
+
+  <!-- SLIDE 4 -->
+  <div class="slide" data-title="Why Not Just Wait for GA?">
+    <div class="slide-number">Backup Slide 4</div>
+    <h1>"Why Not Just Wait for GA?"</h1>
+
+    <div class="columns">
+      <div class="column">
+        <h3>What you lose by waiting</h3>
+        <ul>
+          <li><strong>Time</strong> &mdash; teams on GitHub today have no agentic workflow capability. Every month without it is manual work that could be automated.</li>
+          <li><strong>Learning curve</strong> &mdash; early adoption means your teams build muscle memory before it becomes table stakes.</li>
+          <li><strong>Influence</strong> &mdash; tech preview is when feedback shapes the product. GA means the decisions are made.</li>
+        </ul>
+      </div>
+      <div class="column">
+        <h3>What you risk by starting now</h3>
+        <ul>
+          <li><strong>Minimal</strong> &mdash; a markdown file and a compiled YAML file per workflow. If you need to stop, you delete two files.</li>
+          <li><strong>No infrastructure</strong> &mdash; nothing to decommission, no contracts to cancel.</li>
+          <li><strong>No migration</strong> &mdash; workflows are in your repo. There's nothing external to manage.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>Suggested Adoption Path</h2>
+    <ul class="timeline">
+      <li>
+        <div class="step-title">Month 1</div>
+        <div class="step-detail">One team, one workflow (auto-remediation or PRD generation)</div>
+      </li>
+      <li>
+        <div class="step-title">Month 2</div>
+        <div class="step-detail">Evaluate results, expand to 2-3 teams</div>
+      </li>
+      <li>
+        <div class="step-title">Month 3</div>
+        <div class="step-detail">Build shared workflows for your org's patterns</div>
+      </li>
+      <li>
+        <div class="step-title">Ongoing</div>
+        <div class="step-detail">Track gh-aw releases, bump versions as the platform matures</div>
+      </li>
+    </ul>
+
+    <blockquote>"The cost of trying is a markdown file. The cost of waiting is your GitHub teams not having what your Azure DevOps teams already have with RADD."</blockquote>
+  </div>
+
+  <!-- SLIDE 5 -->
+  <div class="slide" data-title="How Does Security Compare?">
+    <div class="slide-number">Backup Slide 5</div>
+    <h1>"How Does Security Compare to RADD?"</h1>
+
+    <h2>gh-aw's Defense-in-Depth Model</h2>
+    <div class="layer-stack">
+      <div class="layer layer-1">
+        <div class="layer-title">Layer 1: Substrate</div>
+        <div class="layer-desc">GitHub Actions runner VM isolation &bull; Container runtime boundaries &bull; CPU/memory controls</div>
+      </div>
+      <div class="layer layer-2">
+        <div class="layer-title">Layer 2: Configuration</div>
+        <div class="layer-desc">Schema validation, action pinning &bull; Static analysis (actionlint, zizmor) &bull; Expression allowlisting</div>
+      </div>
+      <div class="layer layer-3">
+        <div class="layer-title">Layer 3: Plan (Agent Boundary)</div>
+        <div class="layer-desc">Agents run READ-ONLY &bull; Actions requested via structured JSON &bull; Separate permission-controlled job &bull; Rate-limited, allowlisted operations</div>
+      </div>
+    </div>
+
+    <h2>Key Security Features</h2>
+    <table>
+      <thead>
+        <tr><th>Feature</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Safe outputs</strong></td><td>Agent proposes, validated job acts. Max ops per run, blocked patterns, required labels.</td></tr>
+        <tr><td><strong>Token isolation</strong></td><td>API-proxy holds tokens outside agent container &mdash; agent can't exfiltrate credentials</td></tr>
+        <tr><td><strong>Secret scanning</strong></td><td>All files scanned before artifact upload, secrets redacted</td></tr>
+        <tr><td><strong>Lockdown mode</strong></td><td>Public repos: only surfaces content from users with push access</td></tr>
+        <tr><td><strong>XPIA protection</strong></td><td>Pre-activation sanitization: @mentions, HTML tags, URIs neutralized</td></tr>
+        <tr><td><strong>Threat detection</strong></td><td>Separate job analyzes artifacts for prompt injection / secret leakage</td></tr>
+        <tr><td><strong>Network firewall</strong></td><td>Agent Workflow Firewall &mdash; domain allowlists via iptables/Squid proxy</td></tr>
+      </tbody>
+    </table>
+
+    <blockquote>"RADD controls security through your custom platform &mdash; you own the entire stack. gh-aw controls security through GitHub's platform &mdash; defense-in-depth baked into the runtime. Different trust models, both valid. The question is where your team's security boundary sits."</blockquote>
+  </div>
+
+  <!-- SLIDE 6 -->
+  <div class="slide" data-title="What About Observability?">
+    <div class="slide-number">Backup Slide 6</div>
+    <h1>"What About Observability? RADD Has a Dashboard."</h1>
+
+    <h2>CLI Observability Tools</h2>
+    <pre><span style="color:var(--green)">$</span> gh aw status    <span style="color:var(--text-muted)"># What's running right now? What just finished?</span>
+<span style="color:var(--green)">$</span> gh aw logs      <span style="color:var(--text-muted)"># What did the agent do? Full reasoning trace.</span>
+<span style="color:var(--green)">$</span> gh aw audit     <span style="color:var(--text-muted)"># What has every agent changed in this repo? Complete history.</span></pre>
+
+    <h2>What gh-aw Gives You Natively</h2>
+    <table>
+      <thead>
+        <tr><th>Need</th><th>gh-aw approach</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Run status</td><td><code>gh aw status</code> &mdash; real-time view of active/recent runs from the terminal</td></tr>
+        <tr><td>Agent reasoning</td><td><code>gh aw logs</code> &mdash; stream the agent's full thought process, file reads, tool calls</td></tr>
+        <tr><td>Audit trail</td><td><code>gh aw audit</code> &mdash; every agent action across the repo, timestamped, queryable</td></tr>
+        <tr><td>Workflow history</td><td>Actions tab &mdash; filterable, searchable</td></tr>
+        <tr><td>Artifacts</td><td>PRs, issues, comments &mdash; all in GitHub</td></tr>
+        <tr><td>Metrics</td><td>Workflow summary comments (auto-generated)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>What You'd Add for Parity with RADD</h2>
+    <table>
+      <thead>
+        <tr><th>Need</th><th>How to add it</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Custom dashboard</td><td>DailyOps workflow &rarr; Metrics Collector (Peli's factory uses this)</td></tr>
+        <tr><td>Slack notifications</td><td>Add Slack MCP server to workflow frontmatter</td></tr>
+        <tr><td>DataDog integration</td><td>Add DataDog MCP server</td></tr>
+        <tr><td>Centralized metrics</td><td>Pipe workflow summaries to your existing observability stack</td></tr>
+      </tbody>
+    </table>
+
+    <blockquote>"RADD has a purpose-built dashboard &mdash; that's a real advantage of owning the full stack. gh-aw gives you <code>gh aw status</code>, <code>gh aw logs</code>, and <code>gh aw audit</code> from the CLI, plus the GitHub Actions UI. It's not a custom dashboard, but it's zero-infrastructure observability with a complete audit trail."</blockquote>
+  </div>
+
+  <!-- SLIDE 7 -->
+  <div class="slide" data-title="We Already Have RADD. Why This?">
+    <div class="slide-number">Backup Slide 7</div>
+    <h1>"We Already Have RADD. Why Do We Need This?"</h1>
+
+    <h2>You probably don't &mdash; for Azure DevOps teams</h2>
+    <p style="font-size:17px; color:var(--text-muted); margin-bottom:24px;">RADD works. It's production. It's proven. Don't replace what works.</p>
+
+    <h2>You do &mdash; for GitHub teams</h2>
+    <table>
+      <thead>
+        <tr><th>Question</th><th>Answer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Do you have teams on GitHub?</td><td>gh-aw gives them agentic workflows natively</td></tr>
+        <tr><td>Are teams migrating to GitHub?</td><td>gh-aw is an incentive &mdash; they get this capability on day one</td></tr>
+        <tr><td>Do you want one platform per ecosystem?</td><td>RADD = Azure DevOps, gh-aw = GitHub</td></tr>
+        <tr><td>Do you want community momentum?</td><td>3,700+ stars, 50+ sample workflows, active OSS development</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Coexistence Model</h2>
+    <div class="diagram">Azure DevOps repos  &rarr;  RADD   &rarr;  ADO work items, PRs, Slack
+GitHub repos        &rarr;  gh-aw  &rarr;  Issues, PRs, Actions
+                          &UpDownArrow;
+               Same patterns, different platforms</div>
+
+    <blockquote>"This isn't 'replace RADD.' This is 'cover your GitHub teams with the same class of automation RADD gives your Azure DevOps teams.' One org, full coverage."</blockquote>
+  </div>
+
+  <!-- SLIDE 8 -->
+  <div class="slide" data-title="What's the Learning Curve?">
+    <div class="slide-number">Backup Slide 8</div>
+    <h1>"What's the Learning Curve?"</h1>
+
+    <div class="columns">
+      <div class="column">
+        <h3>For workflow consumers (most teams)</h3>
+        <pre style="border:none; margin:0; padding:0; background:transparent;"><span style="color:var(--text-muted)"># Path A: Interactive wizard</span>
+<span style="color:var(--green)">$</span> gh aw add-wizard
+
+<span style="color:var(--text-muted)"># Path B: Import from shared library</span>
+<span style="color:var(--green)">$</span> gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
+
+<span style="color:var(--text-muted)"># Then compile and push</span>
+<span style="color:var(--green)">$</span> gh aw compile && git push</pre>
+        <div style="margin-top:16px;">
+          <div class="section-label">Time to first workflow</div>
+          <span style="font-size:28px; font-weight:700; color:var(--green);">5 minutes</span>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="section-label">Skills required</div>
+          <span style="font-size:16px;">Git. That's it.</span>
+        </div>
+      </div>
+      <div class="column">
+        <h3>For workflow authors (platform team)</h3>
+        <pre style="border:none; margin:0; padding:0; background:transparent;">1. Write markdown + YAML frontmatter
+2. Understand safe outputs model
+3. Configure MCP servers
+4. Design agent instructions</pre>
+        <div style="margin-top:16px;">
+          <div class="section-label">Time to proficiency</div>
+          <span style="font-size:28px; font-weight:700; color:var(--orange);">1-2 days</span>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="section-label">Skills required</div>
+          <span style="font-size:16px;">Markdown, YAML, prompt engineering basics</span>
+        </div>
+      </div>
+    </div>
+
+    <h2>For workflow architects (you)</h2>
+    <ul>
+      <li>Design shared workflow libraries (this repo)</li>
+      <li>Define org-wide patterns and standards (governance)</li>
+      <li>Build import/composition model (reuse strategy)</li>
+      <li>Configure per-team overrides and extensions (flexibility)</li>
+    </ul>
+    <p style="margin-top:12px; color:var(--text-muted); font-size:15px;"><strong style="color:var(--text);">Comparable to:</strong> What you already did building RADD's workflow creation wizard. Same thinking, different medium.</p>
+  </div>
+
+  <!-- SLIDE 9 -->
+  <div class="slide" data-title="What Engines Do You Recommend?">
+    <div class="slide-number">Backup Slide 9</div>
+    <h1>"What Engines Do You Recommend?"</h1>
+
+    <h2>Engine Comparison</h2>
+    <table>
+      <thead>
+        <tr><th>Engine</th><th>Best for</th><th>Trade-off</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Copilot</strong></td><td>Teams already paying for GitHub Copilot. Default choice.</td><td>Tied to GitHub's model selection</td></tr>
+        <tr><td><strong>Claude</strong></td><td>Complex reasoning, long-context workflows (PRD gen, decomposition)</td><td>Separate API cost (Anthropic)</td></tr>
+        <tr><td><strong>Codex</strong></td><td>Code-heavy implementation tasks</td><td>Separate API cost (OpenAI)</td></tr>
+        <tr><td><strong>Gemini</strong></td><td>Teams with Google Cloud investment</td><td>Separate API cost (Google)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Swapping is one line</h2>
+    <pre><span style="color:var(--text-muted)"># Before</span>
+engine: claude
+
+<span style="color:var(--text-muted)"># After &mdash; that's it</span>
+engine: copilot</pre>
+
+    <blockquote>"We use Claude for all workflows in gh-aw-shared-workflows. It handles long-context tasks well. But the point is: <strong>it's one line to change.</strong> If a better model ships next quarter, you swap and recompile. No code changes, no migration."</blockquote>
+  </div>
+
+  <!-- SLIDE 10 -->
+  <div class="slide" data-title="Quick Reference: Key Numbers">
+    <div class="slide-number">Backup Slide 10</div>
+    <h1>Quick Reference: Key Numbers</h1>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value">3,700+</div>
+        <div class="stat-label">GitHub Stars</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">275</div>
+        <div class="stat-label">Releases</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">100+</div>
+        <div class="stat-label">Agent Factory Workflows</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">514</div>
+        <div class="stat-label">Plan Command PRs Merged</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">96%</div>
+        <div class="stat-label">Doc Updater Merge Rate</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">MIT</div>
+        <div class="stat-label">License</div>
+      </div>
+    </div>
+
+    <h2>Full Metrics</h2>
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>Value</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>gh-aw GitHub stars</td><td>3,700+</td></tr>
+        <tr><td>gh-aw releases</td><td>275</td></tr>
+        <tr><td>gh-aw forks</td><td>268</td></tr>
+        <tr><td>Agent Factory workflows</td><td>100+</td></tr>
+        <tr><td>Plan Command merged PRs</td><td>514 (67% merge rate)</td></tr>
+        <tr><td>Documentation Updater merge rate</td><td>96%</td></tr>
+        <tr><td>Semantic Refactor merged PRs</td><td>112 (79% merge rate)</td></tr>
+        <tr><td>Duplicate Code Detector merged PRs</td><td>76 (79% merge rate)</td></tr>
+        <tr><td>Blog series posts</td><td>19</td></tr>
+        <tr><td>Agentics sample pack workflows</td><td>50+</td></tr>
+        <tr><td>Tech preview date</td><td>February 2026</td></tr>
+        <tr><td>Consumer workflow stub size</td><td>8-26 lines</td></tr>
+        <tr><td>Time to first workflow</td><td>~5 minutes</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div class="keyboard-hint"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> to navigate &bull; <kbd>i</kbd> for index</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const sidebar = document.getElementById('sidebar');
+  const counter = document.getElementById('counter');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  let current = 0;
+
+  // Build sidebar
+  slides.forEach((slide, i) => {
+    const item = document.createElement('div');
+    item.className = 'sidebar-item' + (i === 0 ? ' active' : '');
+    item.textContent = (i + 1) + '. ' + slide.dataset.title;
+    item.onclick = () => { goToSlide(i); sidebar.classList.remove('open'); };
+    sidebar.appendChild(item);
+  });
+
+  function updateUI() {
+    counter.textContent = (current + 1) + ' / ' + slides.length;
+    prevBtn.disabled = current === 0;
+    nextBtn.disabled = current === slides.length - 1;
+    document.querySelectorAll('.sidebar-item').forEach((item, i) => {
+      item.classList.toggle('active', i === current);
+    });
+  }
+
+  function goToSlide(n) {
+    if (n < 0 || n >= slides.length || n === current) return;
+    const dir = n > current ? 1 : -1;
+    slides[current].classList.remove('active');
+    slides[current].classList.add(dir > 0 ? 'exit-left' : '');
+    setTimeout(() => {
+      slides[current].classList.remove('exit-left');
+      current = n;
+      slides[current].classList.add('active');
+      slides[current].scrollTop = 0;
+      updateUI();
+    }, 10);
+    // Immediate switch for responsiveness
+    current = n;
+    slides.forEach((s, i) => {
+      s.classList.remove('active', 'exit-left');
+      if (i === n) s.classList.add('active');
+    });
+    slides[n].scrollTop = 0;
+    updateUI();
+  }
+
+  function nextSlide() { goToSlide(current + 1); }
+  function prevSlide() { goToSlide(current - 1); }
+  function toggleSidebar() { sidebar.classList.toggle('open'); }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
+    if (e.key === 'i' || e.key === 'I') { toggleSidebar(); }
+    if (e.key === 'Escape') { sidebar.classList.remove('open'); }
+  });
+
+  updateUI();
+</script>
+</body>
+</html>
