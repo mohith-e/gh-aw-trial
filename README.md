@@ -66,17 +66,17 @@ These workflows are project-agnostic and designed to be imported into any repo:
 
 | Workflow | Consumer Trigger | Purpose |
 |----------|-----------------|---------|
-| `workflows/prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
-| `workflows/decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
-| `workflows/skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
-| `workflows/mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
-| `workflows/validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
+| `shared/prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
+| `shared/decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
+| `shared/skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
+| `shared/mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
+| `shared/validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
 
 ### Operations
 
 | Workflow | Consumer Trigger | Purpose |
 |----------|-----------------|---------|
-| `workflows/auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
+| `shared/auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 
@@ -116,17 +116,18 @@ curl -sL "https://raw.githubusercontent.com/RealPage/gh-aw-shared-workflows/v0.1
 
 > Your `CLAUDE.md` should describe the project's tech stack, directory structure, coding conventions, and anything an AI agent needs to know to work in the codebase.
 
-#### Step 2: Pull workflow stubs
+#### Step 2: Add workflows
 
-This downloads all the example consumer stubs into `.github/workflows/`:
+Use `gh aw add` to pull workflows directly from this repo. Each command adds a consumer stub (with triggers and permissions) that imports the shared logic:
 
 ```bash
-mkdir -p .github/workflows
-
-for wf in prd-generation decomposition skill-selection mcp-selection validation auto-remediation; do
-  curl -sL "https://raw.githubusercontent.com/RealPage/gh-aw-shared-workflows/v0.1.0/examples/${wf}.md" \
-    -o ".github/workflows/${wf}.md"
-done
+# Add individual workflows
+gh aw add RealPage/gh-aw-shared-workflows/prd-generation
+gh aw add RealPage/gh-aw-shared-workflows/decomposition
+gh aw add RealPage/gh-aw-shared-workflows/skill-selection
+gh aw add RealPage/gh-aw-shared-workflows/mcp-selection
+gh aw add RealPage/gh-aw-shared-workflows/validation
+gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
 ```
 
 Each stub is a thin wrapper that declares triggers and permissions, then imports the shared logic:
@@ -143,11 +144,11 @@ permissions:
   issues: read
 
 imports:
-  - RealPage/gh-aw-shared-workflows/workflows/prd-generation.md@v0.1.0
+  - RealPage/gh-aw-shared-workflows/shared/prd-generation.md@v0.1.0
 ---
 ```
 
-> **Pick and choose:** You don't need all 6 workflows. Only download the ones relevant to your project. See the [Shared Workflows](#shared-workflows) table for what each one does.
+> **Pick and choose:** You don't need all 6 workflows. Only add the ones relevant to your project. See the [Shared Workflows](#shared-workflows) table for what each one does.
 
 #### Step 3: Compile and commit
 
@@ -166,7 +167,7 @@ When this repo publishes a new release, bump the version ref in your stubs:
 
 ```yaml
 imports:
-  - RealPage/gh-aw-shared-workflows/workflows/prd-generation.md@v0.2.0
+  - RealPage/gh-aw-shared-workflows/shared/prd-generation.md@v0.2.0
 ```
 
 Then recompile:
@@ -211,7 +212,7 @@ Pin to a specific version in production (e.g., `@v0.1.0`). Use `@main` only duri
 
 If your project previously used `sync-workflows.sh` to copy workflows:
 
-1. For each workflow in `.github/workflows/`, replace the full file content with a thin import stub (see `examples/`)
+1. For each workflow in `.github/workflows/`, replace the full file content with a thin import stub (see `workflows/`)
 2. Delete `scripts/sync-workflows.sh` from your repo
 3. Remove any auto-sync GitHub Actions workflow (e.g., weekly sync cron)
 4. Run `gh aw compile` and commit the changes
@@ -219,6 +220,6 @@ If your project previously used `sync-workflows.sh` to copy workflows:
 ## Contributing
 
 1. Create a branch in this repo
-2. Edit the workflow under `workflows/`
+2. Edit the shared workflow under `shared/`
 3. Test by pointing a consumer stub at your branch: `@my-branch`
 4. Open a PR — once merged and tagged, all consumers can bump their version ref
