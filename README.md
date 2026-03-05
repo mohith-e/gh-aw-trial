@@ -16,14 +16,12 @@ Workflows run as GitHub Actions, triggered by labels, PR events, or schedules. Y
 ```bash
 cd your-repo
 
-# Add any workflow from this library
-gh aw add RealPage/agentics/prd-generation
+# Make sure your checkout is clean and on main
+git checkout main
 
-# Compile and push
-gh aw compile
-git add .github/
-git commit -m "Add PRD generation workflow"
-git push
+# Add any workflow from this library — the wizard walks you through setup
+# and creates a PR for review
+gh aw add-wizard RealPage/agentics/workflows/prd-generation.md@v0.2.0
 ```
 
 That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a PR.
@@ -43,9 +41,9 @@ Pick and choose. You don't need all of them — add only what's useful for your 
 
 ```bash
 # Add several at once
-gh aw add RealPage/agentics/prd-generation
-gh aw add RealPage/agentics/decomposition
-gh aw add RealPage/agentics/validation
+gh aw add-wizard RealPage/agentics/workflows/prd-generation.md@v0.2.0
+gh aw add-wizard RealPage/agentics/workflows/decomposition.md@v0.2.0
+gh aw add-wizard RealPage/agentics/workflows/validation.md@v0.2.0
 ```
 
 ### Adding auto-remediation
