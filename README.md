@@ -73,6 +73,7 @@ Not ready to add workflows to your repo? You can explore how they work first:
 - [gh-aw imports reference](https://github.github.com/gh-aw/reference/imports/#remote-repository-imports) — how remote imports work
 - [Agent Factory blog series](https://github.github.com/gh-aw/blog/) — 100+ production workflows with real metrics
 - [Workflow reference](docs/workflows.md) — detailed docs on each workflow in this repo, including pipeline diagrams
+- [CLI cheatsheet](docs/cli-cheatsheet.md) — common `gh aw` commands for managing and debugging workflows
 
 ## Contributing
 
