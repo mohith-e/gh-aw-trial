@@ -30,8 +30,8 @@ gh secret list -R RealPage/lumina-agents-mcp
 # 5. Verify GitHub Actions is enabled — check recent runs
 gh run list -R RealPage/lumina-agents-mcp --limit 3
 
-# 6. Verify gh-aw-shared-workflows is up to date
-cd ~/ws/rpdev/gh-aw-shared-workflows
+# 6. Verify agentics is up to date
+cd ~/ws/rpdev/agentics
 git checkout main && git pull
 
 # 7. Pre-run the full pipeline (see "Pre-Complete the Pipeline" below)
@@ -76,8 +76,8 @@ gh run list -R RealPage/lumina-agents-mcp --limit 3 --json name,status,conclusio
 Open **two terminal tabs**:
 
 ```bash
-# Tab 1: gh-aw-shared-workflows (for Segments 2, 4, 6)
-cd ~/ws/rpdev/gh-aw-shared-workflows
+# Tab 1: agentics (for Segments 2, 4, 6)
+cd ~/ws/rpdev/agentics
 
 # Tab 2: lumina-agents-mcp (for Segments 4, 5)
 cd ~/ws/rpdev/lumina-agents-mcp
@@ -88,7 +88,7 @@ git checkout main && git pull
 
 1. [gh-aw docs — Overview](https://github.github.com/gh-aw/introduction/overview/)
 2. [gh-aw blog / Agent Factory](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)
-3. [gh-aw-shared-workflows README](https://github.com/RealPage/gh-aw-shared-workflows)
+3. [agentics README](https://github.com/RealPage/agentics)
 4. [lumina-agents-mcp repo](https://github.com/RealPage/lumina-agents-mcp)
 5. [lumina-agents-mcp workflows directory](https://github.com/RealPage/lumina-agents-mcp/tree/main/.github/workflows)
 6. [lumina-agents-mcp CLAUDE.md](https://github.com/RealPage/lumina-agents-mcp/blob/main/CLAUDE.md)
@@ -259,23 +259,23 @@ This is where the audience starts thinking "I could do this." Show the simplicit
 ### Live Demo Steps
 
 **Step 1: Show the shared workflows repo** (2 min)
-- Switch to browser tab: [gh-aw-shared-workflows README](https://github.com/RealPage/gh-aw-shared-workflows)
+- Switch to browser tab: [agentics README](https://github.com/RealPage/agentics)
 - Show the two pipeline diagrams (Mermaid renders in GitHub)
 
 > "This is our shared workflows repo. It contains six reusable workflows organized into two pipelines. Feature development — from idea to validated PR. And auto-remediation — from error log to fix PR. Consumer repos import these, they don't copy them."
 
 **Step 2: Anatomy of a shared workflow** (3 min)
-- Switch to **terminal tab 1** (gh-aw-shared-workflows)
+- Switch to **terminal tab 1** (agentics)
 
 ```bash
 # Show the repo structure — shared logic vs consumer stubs
-ls shared/    # ← shared workflow logic (imported by consumers)
-ls workflows/ # ← consumer stubs (what gh aw add pulls)
+ls workflows/    # ← workflow definitions (imported by consumers)
+ls examples/  # ← consumer stubs (what gh aw add pulls)
 ```
 
 ```bash
 # Open the PRD generation shared workflow — show the full content
-cat shared/prd-generation.md | head -30
+cat workflows/prd-generation.md | head -30
 ```
 
 Walk through what's on screen:
@@ -300,7 +300,7 @@ You are a product requirements analyst...
 
 ```bash
 # Now show a consumer stub — this is what teams actually put in their repo
-cat workflows/prd-generation.md
+cat examples/prd-generation.md
 ```
 
 > "And here's the consumer side — 13 lines. It declares the triggers and imports the shared logic. The consumer doesn't duplicate anything."
@@ -336,10 +336,10 @@ cat .github/workflows/code-review.md
 
 ```bash
 # Pull a production-ready workflow from our shared library — one command
-gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
+gh aw add RealPage/agentics/auto-remediation
 ```
 
-> "Now let me show you the other path — pulling from a shared workflow library. We've built a set of production-ready workflows in our gh-aw-shared-workflows repo. Instead of writing from scratch, a team can pull a ready-made workflow with one command."
+> "Now let me show you the other path — pulling from a shared workflow library. We've built a set of production-ready workflows in our agentics repo. Instead of writing from scratch, a team can pull a ready-made workflow with one command."
 
 ```bash
 # Show what it generated
@@ -375,7 +375,7 @@ git checkout -- .  # Reset any changes
 > *(Don't narrate this — just quickly clean up before moving on.)*
 
 **Step 7: Show the full catalog** (30 sec)
-- Switch to browser tab: [gh-aw-shared-workflows workflows/](https://github.com/RealPage/gh-aw-shared-workflows/tree/main/workflows)
+- Switch to browser tab: [agentics workflows/](https://github.com/RealPage/agentics/tree/main/workflows)
 
 > "Here's our full library — PRD generation, decomposition, skill selection, MCP selection, validation, auto-remediation. Each one is 8-26 lines. A team can pull any combination with `gh aw add` and have a working pipeline in minutes."
 
@@ -401,7 +401,7 @@ This is the centerpiece. Mirror what RADD demoed (bug → AI fix → PR in ~4.5 
 - Click to [.github/workflows/](https://github.com/RealPage/lumina-agents-mcp/tree/main/.github/workflows)
 - Point out the `.md` + `.lock.yml` pairs
 
-> "Each `.md` file is a thin stub that imports from gh-aw-shared-workflows. The `.lock.yml` next to it is the compiled GitHub Actions YAML. The shared logic lives upstream. The consumer just declares triggers and imports."
+> "Each `.md` file is a thin stub that imports from agentics. The `.lock.yml` next to it is the compiled GitHub Actions YAML. The shared logic lives upstream. The consumer just declares triggers and imports."
 
 - Click to [CLAUDE.md](https://github.com/RealPage/lumina-agents-mcp/blob/main/CLAUDE.md)
 
@@ -593,11 +593,11 @@ Bridge directly from RADD's Sentry pipeline. Be explicit about the parallel.
 ### Live Demo Steps
 
 **Step 1: Open the auto-remediation workflow** (2 min)
-- Switch to **terminal tab 1** (gh-aw-shared-workflows)
+- Switch to **terminal tab 1** (agentics)
 
 ```bash
 # Show the shared auto-remediation workflow
-cat shared/auto-remediation.md | head -50
+cat workflows/auto-remediation.md | head -50
 ```
 
 - Walk through the five stages:
@@ -620,7 +620,7 @@ Walk through each stage:
 
 ```bash
 # Show the consumer stub — this is ALL a team puts in their repo
-cat workflows/auto-remediation.md
+cat examples/auto-remediation.md
 ```
 
 > "Here's all a team needs to add to their repo — 26 lines. Declares the hourly schedule trigger, the manual dispatch inputs for overrides and dry-run mode, and the import. That's it. Add this file, set three secrets — `SERVICE_NAME`, `ELASTIC_MCP_URL`, `ELASTIC_MCP_API_KEY` — run `gh aw compile`, and your repo has automated error remediation."
@@ -629,7 +629,7 @@ cat workflows/auto-remediation.md
 
 ```bash
 # Show the MCP server configuration in the shared workflow
-grep -A4 "mcp-servers:" shared/auto-remediation.md
+grep -A4 "mcp-servers:" workflows/auto-remediation.md
 ```
 
 > "You use Sentry. This workflow uses Elastic. The swap is straightforward — you'd replace the Elastic MCP server with a Sentry MCP server in the `mcp-servers:` block and adjust the query instructions. The pattern is identical: discover errors, triage, fix, PR. The data source is pluggable.
@@ -706,7 +706,7 @@ Reinforce the lego-block philosophy. Show this audience they wouldn't be locked 
 **Share links:**
 - [gh-aw Documentation](https://github.github.com/gh-aw/)
 - [github/gh-aw Repository](https://github.com/github/gh-aw) (3.7k stars, MIT license)
-- [gh-aw-shared-workflows](https://github.com/RealPage/gh-aw-shared-workflows) (our shared workflows)
+- [agentics](https://github.com/RealPage/agentics) (our shared workflows)
 - [Agentics Template](https://github.com/githubnext/agentics-template) (starter template)
 - [Agentics Sample Pack](https://github.com/githubnext/agentics) (50+ workflows)
 - [Agent Factory Blog Series](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)

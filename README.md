@@ -1,4 +1,4 @@
-# gh-aw Shared Workflows
+# Agentics
 
 Reusable [GitHub Agentic Workflows (gh-aw)](https://github.github.com/gh-aw/) for automating the full software development lifecycle with Claude-powered agents.
 
@@ -66,17 +66,17 @@ These workflows are project-agnostic and designed to be imported into any repo:
 
 | Workflow | Consumer Trigger | Purpose |
 |----------|-----------------|---------|
-| `shared/prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
-| `shared/decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
-| `shared/skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
-| `shared/mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
-| `shared/validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
+| `workflows/prd-generation.md` | Issue labeled `feature-idea` | Generate a PRD from a feature idea |
+| `workflows/decomposition.md` | PRD merged to `main` | Break PRD into epic + stories |
+| `workflows/skill-selection.md` | PRD merged to `main` | Fetch coding skills from ai-coding-toolkit |
+| `workflows/mcp-selection.md` | PRD merged to `main` | Configure MCP servers for implementation agents |
+| `workflows/validation.md` | PR labeled `needs-validation` | Validate code against PRD acceptance criteria |
 
 ### Operations
 
 | Workflow | Consumer Trigger | Purpose |
 |----------|-----------------|---------|
-| `shared/auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
+| `workflows/auto-remediation.md` | Hourly schedule + manual | Discover errors from Elastic, triage, implement fixes, open PRs |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 
@@ -110,7 +110,7 @@ touch CLAUDE.md
 
 # PRD template — used by the prd-generation workflow
 mkdir -p docs/prds/templates
-curl -sL "https://raw.githubusercontent.com/RealPage/gh-aw-shared-workflows/v0.1.0/docs/prds/templates/prd-template.md" \
+curl -sL "https://raw.githubusercontent.com/RealPage/agentics/v0.1.0/docs/prds/templates/prd-template.md" \
   -o docs/prds/templates/prd-template.md
 ```
 
@@ -122,12 +122,12 @@ Use `gh aw add` to pull workflows directly from this repo. Each command adds a c
 
 ```bash
 # Add individual workflows
-gh aw add RealPage/gh-aw-shared-workflows/prd-generation
-gh aw add RealPage/gh-aw-shared-workflows/decomposition
-gh aw add RealPage/gh-aw-shared-workflows/skill-selection
-gh aw add RealPage/gh-aw-shared-workflows/mcp-selection
-gh aw add RealPage/gh-aw-shared-workflows/validation
-gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
+gh aw add RealPage/agentics/prd-generation
+gh aw add RealPage/agentics/decomposition
+gh aw add RealPage/agentics/skill-selection
+gh aw add RealPage/agentics/mcp-selection
+gh aw add RealPage/agentics/validation
+gh aw add RealPage/agentics/auto-remediation
 ```
 
 Each stub is a thin wrapper that declares triggers and permissions, then imports the shared logic:
@@ -144,7 +144,7 @@ permissions:
   issues: read
 
 imports:
-  - RealPage/gh-aw-shared-workflows/shared/prd-generation.md@v0.1.0
+  - RealPage/agentics/workflows/prd-generation.md@v0.1.0
 ---
 ```
 
@@ -167,7 +167,7 @@ When this repo publishes a new release, bump the version ref in your stubs:
 
 ```yaml
 imports:
-  - RealPage/gh-aw-shared-workflows/shared/prd-generation.md@v0.2.0
+  - RealPage/agentics/workflows/prd-generation.md@v0.2.0
 ```
 
 Then recompile:
@@ -220,6 +220,6 @@ If your project previously used `sync-workflows.sh` to copy workflows:
 ## Contributing
 
 1. Create a branch in this repo
-2. Edit the shared workflow under `shared/`
+2. Edit the workflow under `workflows/`
 3. Test by pointing a consumer stub at your branch: `@my-branch`
 4. Open a PR — once merged and tagged, all consumers can bump their version ref

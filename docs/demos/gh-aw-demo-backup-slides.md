@@ -231,7 +231,7 @@ GitHub repos        ──→  gh-aw         ──→  Issues, PRs, Actions
 gh aw add-wizard
 
 # Path B: Import from shared library — one command, pulls from org's shared repo
-gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
+gh aw add RealPage/agentics/auto-remediation
 
 # Then compile and push
 gh aw compile && git push
@@ -278,7 +278,7 @@ gh aw compile && git push
 
 ### Our choice
 
-> "We use Claude for all workflows in gh-aw-shared-workflows. It handles long-context tasks like PRD generation and multi-step analysis well. But the point is: **it's one line to change.** If a better model ships next quarter, you swap and recompile. No code changes, no migration."
+> "We use Claude for all workflows in agentics. It handles long-context tasks like PRD generation and multi-step analysis well. But the point is: **it's one line to change.** If a better model ships next quarter, you swap and recompile. No code changes, no migration."
 
 ### Swap demo
 
