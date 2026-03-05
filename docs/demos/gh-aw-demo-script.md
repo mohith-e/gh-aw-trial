@@ -8,22 +8,96 @@
 
 ## Pre-Demo Setup Checklist
 
-- [ ] `gh aw` CLI installed and authenticated (`gh aw --version`)
-- [ ] `lumina-agents-mcp` repo cloned, workflows compiled, GitHub Actions enabled
-- [ ] `ANTHROPIC_API_KEY` secret configured on `lumina-agents-mcp`
-- [ ] `gh-aw-shared-workflows` repo up to date on `main`
-- [ ] Draft feature idea ready to file (title: "Add agent response caching with configurable TTL")
-- [ ] Pre-completed pipeline run available on `lumina-agents-mcp` as backup (PRD PR, decomposed issues, implementation PR, validation comment)
-- [ ] Elastic MCP endpoint configured (if showing auto-remediation live)
-- [ ] Browser tabs pre-loaded:
-  1. [gh-aw docs — Overview](https://github.github.com/gh-aw/introduction/overview/)
-  2. [gh-aw blog / Agent Factory](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)
-  3. [gh-aw-shared-workflows README](https://github.com/RealPage/gh-aw-shared-workflows)
-  4. [lumina-agents-mcp repo](https://github.com/RealPage/lumina-agents-mcp)
-  5. [github/gh-aw repo](https://github.com/github/gh-aw) — for Related Projects
-  6. [Patterns page](https://github.github.com/gh-aw/patterns/issue-ops/)
-  7. [Engines reference](https://github.github.com/gh-aw/reference/engines/)
-- [ ] Terminal open with `gh-aw-shared-workflows` and `lumina-agents-mcp` repos
+### Day-before prep
+
+Run these commands to verify everything works:
+
+```bash
+# 1. Verify gh-aw CLI
+gh aw --version
+
+# 2. Verify lumina-agents-mcp is on main and up to date
+cd ~/ws/rpdev/lumina-agents-mcp
+git checkout main && git pull
+
+# 3. Verify workflows compile clean
+gh aw compile
+
+# 4. Verify secrets are configured
+gh secret list -R RealPage/lumina-agents-mcp
+# Should show: ANTHROPIC_API_KEY, COPILOT_GITHUB_TOKEN
+
+# 5. Verify GitHub Actions is enabled — check recent runs
+gh run list -R RealPage/lumina-agents-mcp --limit 3
+
+# 6. Verify agentics is up to date
+cd ~/ws/rpdev/agentics
+git checkout main && git pull
+
+# 7. Pre-run the full pipeline (see "Pre-Complete the Pipeline" below)
+```
+
+### Pre-complete the pipeline (backup for live demo)
+
+File a test feature idea and let the pipeline run end-to-end. Record the artifact URLs:
+
+```bash
+cd ~/ws/rpdev/lumina-agents-mcp
+
+# File the feature idea
+gh issue create \
+  --repo RealPage/lumina-agents-mcp \
+  --title "Add agent response caching with configurable TTL" \
+  --body "## Feature Idea
+
+Add a caching layer for agent responses to reduce latency and API costs
+for repeated or similar queries. Cache should support:
+
+- Configurable TTL per agent type
+- Cache invalidation on agent configuration changes
+- Redis backend for distributed deployments
+- In-memory fallback for single-node setups
+- Cache hit/miss metrics exposed via existing observability" \
+  --label "feature-idea"
+
+# Watch for the PRD generation workflow to trigger
+gh run list -R RealPage/lumina-agents-mcp --limit 3 --json name,status,conclusion
+
+# After pipeline completes, record these URLs:
+# - PRD PR:           https://github.com/RealPage/lumina-agents-mcp/pull/___
+# - Epic issue:       https://github.com/RealPage/lumina-agents-mcp/issues/___
+# - Story issues:     https://github.com/RealPage/lumina-agents-mcp/issues/___
+# - Implementation PR: https://github.com/RealPage/lumina-agents-mcp/pull/___
+# - Validation comment on the PR
+```
+
+### Demo-day terminal setup
+
+Open **two terminal tabs**:
+
+```bash
+# Tab 1: agentics (for Segments 2, 4, 6)
+cd ~/ws/rpdev/agentics
+
+# Tab 2: lumina-agents-mcp (for Segments 4, 5)
+cd ~/ws/rpdev/lumina-agents-mcp
+git checkout main && git pull
+```
+
+### Browser tabs to pre-load
+
+1. [gh-aw docs — Overview](https://github.github.com/gh-aw/introduction/overview/)
+2. [gh-aw blog / Agent Factory](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)
+3. [agentics README](https://github.com/RealPage/agentics)
+4. [lumina-agents-mcp repo](https://github.com/RealPage/lumina-agents-mcp)
+5. [lumina-agents-mcp workflows directory](https://github.com/RealPage/lumina-agents-mcp/tree/main/.github/workflows)
+6. [lumina-agents-mcp CLAUDE.md](https://github.com/RealPage/lumina-agents-mcp/blob/main/CLAUDE.md)
+7. [lumina-agents-mcp Actions tab](https://github.com/RealPage/lumina-agents-mcp/actions)
+8. [github/gh-aw repo](https://github.com/github/gh-aw) — for Related Projects
+9. [Patterns page](https://github.github.com/gh-aw/patterns/issue-ops/)
+10. [Engines reference](https://github.github.com/gh-aw/reference/engines/)
+11. [Backup: pre-completed PRD PR](https://github.com/RealPage/lumina-agents-mcp/pull/___) *(fill in after pre-run)*
+12. [Backup: pre-completed implementation PR](https://github.com/RealPage/lumina-agents-mcp/pull/___) *(fill in after pre-run)*
 
 ---
 
@@ -185,27 +259,30 @@ This is where the audience starts thinking "I could do this." Show the simplicit
 ### Live Demo Steps
 
 **Step 1: Show the shared workflows repo** (2 min)
-- Switch to [gh-aw-shared-workflows README](https://github.com/RealPage/gh-aw-shared-workflows)
-- Show the two pipeline diagrams:
-  - Feature Development Pipeline flow
-  - Auto-Remediation Pipeline flow
+- Switch to browser tab: [agentics README](https://github.com/RealPage/agentics)
+- Show the two pipeline diagrams (Mermaid renders in GitHub)
 
 > "This is our shared workflows repo. It contains six reusable workflows organized into two pipelines. Feature development — from idea to validated PR. And auto-remediation — from error log to fix PR. Consumer repos import these, they don't copy them."
 
 **Step 2: Anatomy of a shared workflow** (3 min)
-- Open `shared/prd-generation.md` in the terminal or editor
+- Switch to **terminal tab 1** (agentics)
 
-> "Let's look at what a workflow actually is."
+```bash
+# Show the repo structure — shared logic vs consumer stubs
+ls workflows/    # ← workflow definitions (imported by consumers)
+ls examples/  # ← consumer stubs (what gh aw add pulls)
+```
 
-Walk through the structure:
+```bash
+# Open the PRD generation shared workflow — show the full content
+cat workflows/prd-generation.md | head -30
+```
+
+Walk through what's on screen:
 
 ```
 ---                                    ← YAML frontmatter starts
 engine: claude                         ← Which AI engine to use
-on:                                    ← GitHub event triggers
-  workflow_dispatch:
-  issues:
-    types: [opened, labeled]
 safe-outputs:                          ← Allowed operations (defense-in-depth)
   - create-pull-request
   - add-comment:
@@ -217,67 +294,56 @@ safe-outputs:                          ← Allowed operations (defense-in-depth)
 You are a product requirements analyst...
 ```
 
-> "That's it. YAML frontmatter declares triggers, engine, permissions, and safety constraints. The body is natural language instructions. No complex pipeline DSL. No scripting language. You tell the agent what to do in plain English, and `gh aw compile` generates the Actions YAML.
+> "That's it. YAML frontmatter declares the engine, safety constraints, and MCP servers. The body is natural language instructions. No complex pipeline DSL. No scripting language. You tell the agent what to do in plain English, and `gh aw compile` generates the Actions YAML.
 >
 > Compare this to writing a GitHub Actions workflow from scratch — or building a custom platform. This is a markdown file."
 
+```bash
+# Now show a consumer stub — this is what teams actually put in their repo
+cat examples/prd-generation.md
+```
+
+> "And here's the consumer side — 13 lines. It declares the triggers and imports the shared logic. The consumer doesn't duplicate anything."
+
 **Step 3: `gh aw add-wizard` — the interactive way** (3 min)
-- In terminal, inside a consumer repo (e.g., `lumina-agents-mcp`), run:
+- Switch to **terminal tab 2** (lumina-agents-mcp)
 
 ```bash
+cd ~/ws/rpdev/lumina-agents-mcp
 gh aw add-wizard
 ```
 
 > "RADD has a great 3-step wizard — choose trigger, configure actions, review and activate. gh-aw has its own version. Let me show you."
 
 - Walk through the interactive prompts as they appear:
-  - **Workflow name** — give it a name (e.g., "code-review")
-  - **Trigger selection** — pick from issues, PRs, schedule, dispatch, etc.
-  - **Engine** — choose Claude, Copilot, Codex, Gemini
-  - **Safe outputs** — select which operations the agent can perform
+  - **Workflow name** — type `code-review`
+  - **Trigger selection** — pick `pull_request`
+  - **Engine** — choose `claude`
+  - **Safe outputs** — select `add-comment`
   - **Instructions** — the wizard scaffolds the markdown file with your choices
 
 > "It walks you through every decision — trigger, engine, permissions, safe outputs — and generates the workflow markdown file for you. For someone who's never written a gh-aw workflow before, this is the fastest path. You answer a few questions, it writes the file, you run `gh aw compile`, and you're live.
 >
 > Same outcome as RADD's wizard — different interface. RADD gives you a web UI. gh-aw gives you a CLI. Both get you to a working workflow in under 5 minutes."
 
-- Show the generated `.md` file in `.github/workflows/` after the wizard completes
-
-**Step 4: Adding a shared workflow from RealPage's library** (2 min)
-- Stay in the consumer repo terminal
-- Run:
-
 ```bash
-gh aw add RealPage/gh-aw-shared-workflows/auto-remediation
+# Show what the wizard generated
+cat .github/workflows/code-review.md
 ```
 
-> "Now let me show you the other path — pulling from a shared workflow library. We've built a set of production-ready workflows in our gh-aw-shared-workflows repo. Instead of writing from scratch, a team can pull a ready-made workflow with one command."
+**Step 4: Adding a shared workflow from RealPage's library** (2 min)
+- Stay in **terminal tab 2** (lumina-agents-mcp)
 
-- Show the generated file in `.github/workflows/auto-remediation.md`
+```bash
+# Pull a production-ready workflow from our shared library — one command
+gh aw add RealPage/agentics/auto-remediation
+```
 
-> "One command. It pulled a consumer stub with triggers, permissions, and an import pointing to our shared logic. Let me show you what it generated."
+> "Now let me show you the other path — pulling from a shared workflow library. We've built a set of production-ready workflows in our agentics repo. Instead of writing from scratch, a team can pull a ready-made workflow with one command."
 
-- Open the generated file — point out the structure:
-
-```yaml
----
-on:
-  schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
-    inputs:
-      service_name:
-        description: "Service name to search errors for"
-        required: false
-      # ... more inputs
-
-permissions:
-  contents: read
-  issues: read
-
-imports:
-  - RealPage/gh-aw-shared-workflows/shared/auto-remediation.md@v0.1.0
----
+```bash
+# Show what it generated
+cat .github/workflows/auto-remediation.md
 ```
 
 > "Triggers are included — hourly schedule and manual dispatch with configurable inputs. The `imports:` line pulls the shared logic from our org's repo, pinned to a version. The team doesn't need to understand the 150 lines of workflow logic. They configure their secrets, compile, and they're live.
@@ -285,19 +351,33 @@ imports:
 > If we improve the shared workflow upstream — better error classification, smarter triage — every consumer gets the update when they bump the version tag."
 
 **Step 5: The compile step** (1 min)
-- In terminal, show:
 
 ```bash
+# Compile all workflows — resolves imports, generates lockfiles
 gh aw compile
 ```
 
 > "One command. This reads all your `.md` workflow files, resolves imports, validates safe outputs, and generates `.lock.yml` files — the actual GitHub Actions workflows. Commit those, push, and you're live."
 
-**Step 6: Show all example stubs** (1 min)
-- Open the [workflows/ directory on GitHub](https://github.com/RealPage/gh-aw-shared-workflows/tree/main/workflows)
-- Quickly show that each file is the same pattern, 8-15 lines each
+```bash
+# Show the compiled output
+ls .github/workflows/*.lock.yml
+```
 
-> "Here's our full library of consumer stubs — PRD generation, decomposition, skill selection, MCP selection, validation, auto-remediation. Each one is 8-26 lines. A team can pull any combination of these into their repo with `gh aw add` and have a working pipeline in minutes."
+**Step 6: Clean up the demo artifacts** (30 sec)
+
+```bash
+# Remove the wizard-created workflow so it doesn't interfere with Segment 5
+rm -f .github/workflows/code-review.md .github/workflows/code-review.lock.yml
+git checkout -- .  # Reset any changes
+```
+
+> *(Don't narrate this — just quickly clean up before moving on.)*
+
+**Step 7: Show the full catalog** (30 sec)
+- Switch to browser tab: [agentics workflows/](https://github.com/RealPage/agentics/tree/main/workflows)
+
+> "Here's our full library — PRD generation, decomposition, skill selection, MCP selection, validation, auto-remediation. Each one is 8-26 lines. A team can pull any combination with `gh aw add` and have a working pipeline in minutes."
 
 ### Transition
 
@@ -313,57 +393,63 @@ This is the centerpiece. Mirror what RADD demoed (bug → AI fix → PR in ~4.5 
 
 ### Live Demo Steps
 
-**Step 1: Setup — show the repo** (2 min)
-- Open `lumina-agents-mcp` repo in browser
-- Navigate to `.github/workflows/` directory
-- Show the workflow stubs
+**Step 1: Show the repo and its workflows** (2 min)
+- Switch to browser tab: [lumina-agents-mcp repo](https://github.com/RealPage/lumina-agents-mcp)
 
-> "This is lumina-agents-mcp — a real project, not a demo scaffold. Let me show you its workflow directory."
+> "This is lumina-agents-mcp — a real MCP server project, not a demo scaffold. Python, FastMCP, GCP integration, full test suite. Let me show you its workflow directory."
 
-- Click through 2-3 workflow stubs
+- Click to [.github/workflows/](https://github.com/RealPage/lumina-agents-mcp/tree/main/.github/workflows)
+- Point out the `.md` + `.lock.yml` pairs
 
-> "Each of these is a thin stub that imports from gh-aw-shared-workflows. The shared logic lives upstream. The consumer just declares triggers and imports."
+> "Each `.md` file is a thin stub that imports from agentics. The `.lock.yml` next to it is the compiled GitHub Actions YAML. The shared logic lives upstream. The consumer just declares triggers and imports."
 
-- Open the `CLAUDE.md` file in the repo root
+- Click to [CLAUDE.md](https://github.com/RealPage/lumina-agents-mcp/blob/main/CLAUDE.md)
 
 > "This is how the agent understands the project. Tech stack, conventions, architecture, key file paths — all in a markdown file in the repo root. No database config, no web UI. The agent reads this before every workflow run. If you want to change how the agent behaves, you edit this file."
 
 **Step 2: File a feature idea** (2 min)
-- Go to Issues → New Issue on `lumina-agents-mcp`
-- Title: **"Add agent response caching with configurable TTL"**
-- Body:
+- Switch to **terminal tab 2** (lumina-agents-mcp)
 
-> ```
-> ## Feature Idea
->
-> Add a caching layer for agent responses to reduce latency and API costs
-> for repeated or similar queries. Cache should support:
->
-> - Configurable TTL per agent type
-> - Cache invalidation on agent configuration changes
-> - Redis backend for distributed deployments
-> - In-memory fallback for single-node setups
-> - Cache hit/miss metrics exposed via existing observability
-> ```
+```bash
+# File a feature idea — the feature-idea label is the trigger
+gh issue create \
+  --repo RealPage/lumina-agents-mcp \
+  --title "Add agent response caching with configurable TTL" \
+  --body "## Feature Idea
 
-- Add the `feature-idea` label
-- Submit
+Add a caching layer for agent responses to reduce latency and API costs
+for repeated or similar queries. Cache should support:
 
-> "I'm filing a feature idea — just like a PM or tech lead would. The `feature-idea` label is the trigger. Watch what happens."
+- Configurable TTL per agent type
+- Cache invalidation on agent configuration changes
+- Redis backend for distributed deployments
+- In-memory fallback for single-node setups
+- Cache hit/miss metrics exposed via existing observability" \
+  --label "feature-idea"
+```
+
+> "I'm filing a feature idea from the terminal — just like a PM or tech lead would. The `feature-idea` label is the trigger. Watch what happens."
 
 **Step 3: Show PRD Generation running + `gh aw status`** (3 min)
-- Navigate to Actions tab → show the PRD Generation workflow running
-- Click into the running workflow
+- Switch to browser tab: [lumina-agents-mcp Actions](https://github.com/RealPage/lumina-agents-mcp/actions)
+- Show the PRD Generation workflow appearing in the runs list
+- Click into the running workflow to show the live log
 
 > "The workflow triggered automatically. The agent is reading the issue, reading the project's CLAUDE.md for architectural context, reading the PRD template, and generating a comprehensive PRD."
 
-- **Switch to terminal** and run:
+- Switch back to terminal:
 
 ```bash
+# Check status from the CLI — no need to watch the browser
 gh aw status
 ```
 
 > "Instead of watching the Actions UI, I can check status from my terminal. `gh aw status` shows every active and recent workflow run — which workflows are running, which are queued, which just finished. This is your quick pulse check without leaving the command line."
+
+```bash
+# Also check via standard gh CLI
+gh run list -R RealPage/lumina-agents-mcp --limit 3
+```
 
 - While waiting, explain what's happening:
 
@@ -371,39 +457,77 @@ gh aw status
 >
 > You showed bug → AI fix → PR in about 4.5 minutes with RADD. Here's the first stage of feature idea → PRD → stories → implementation → validation. Same velocity, broader scope."
 
-- **If the run completes in time:** Show the generated PR with the PRD document. Walk through the sections.
-- **If it's still running:** Switch to the pre-completed backup. "Here's one I prepared earlier — let me show you the output."
+- **If the run completes in time** (~3-5 min):
+
+```bash
+# List PRs to find the generated PRD
+gh pr list -R RealPage/lumina-agents-mcp --limit 3
+```
+
+- Open the PRD PR in browser — walk through the generated sections.
+
+- **If it's still running** — switch to backup:
+
+> "This typically takes 3-5 minutes. Let me show you one I prepared earlier so we can keep moving."
+
+- Switch to backup browser tab with the pre-completed PRD PR
 
 Show the generated PRD:
 > "Look at this — problem statement, four user stories, P0/P1/P2 requirements, technical considerations calling out Redis integration and cache invalidation strategies, acceptance criteria checklist, test strategy. This is a real PRD. A human PM would review and refine this, but the heavy lifting is done."
 
 **Step 4: Merge and fan-out** (3 min)
-- Merge the PRD PR (or show the pre-completed merge)
-- Navigate to Actions tab — show three workflows triggering simultaneously:
-  1. **Decomposition** — creating epic + stories
+
+```bash
+# Merge the PRD PR (replace <PR_NUMBER> with the actual number)
+gh pr merge <PR_NUMBER> -R RealPage/lumina-agents-mcp --squash
+```
+
+- Switch to browser: [Actions tab](https://github.com/RealPage/lumina-agents-mcp/actions)
+- Show three workflows triggering simultaneously:
+  1. **PRD Decomposition** — creating epic + stories
   2. **Skill Selection** — fetching relevant coding skills
   3. **MCP Selection** — configuring data sources
 
 > "Merging the PRD triggers three workflows in parallel. This is the fan-out. Decomposition breaks the PRD into an epic and prioritized stories. Skill selection fetches relevant coding skills from our ai-coding-toolkit — things like `python-project`, `api-design`, `elk-logging`. MCP selection configures which external tools the implementation agent will have access to — maybe BigQuery for schema validation, Brave Search for API docs."
 
-- Show the Issues tab with the created epic and stories
-- Show story issues with priority labels (`priority:critical`, `priority:high`, `priority:low`)
+- Switch to terminal to check what was created:
+
+```bash
+# List issues — look for the epic and stories
+gh issue list -R RealPage/lumina-agents-mcp --label epic
+gh issue list -R RealPage/lumina-agents-mcp --label story
+```
+
+- Switch to browser: [Issues tab](https://github.com/RealPage/lumina-agents-mcp/issues)
+- Show story issues with priority labels
 
 > "The decomposition created an epic issue and individual story issues, each prioritized based on the PRD requirements. P0 items are labeled `priority:critical` and `ready-for-implementation`. The agent understood the dependency graph — it only marks stories as ready when their dependencies are met."
 
 **Step 5: Implementation** (5 min)
-- Show a story issue that has the `ready-for-implementation` label
-- Navigate to Actions → show the implementation workflow running (or show pre-completed)
+
+```bash
+# Find a story that's ready for implementation
+gh issue list -R RealPage/lumina-agents-mcp --label ready-for-implementation
+```
+
+- Show the story issue in browser
+- Switch to [Actions tab](https://github.com/RealPage/lumina-agents-mcp/actions) — show the AI Implementation workflow running (or use the pre-completed backup)
 
 > "When a story is labeled `ready-for-implementation`, the implementation agent picks it up. It reads the story, reads the PRD for full context, reads the CLAUDE.md for project conventions, and has access to whatever MCP tools were configured — maybe BigQuery for checking schemas, maybe Brave Search for looking up Redis client library docs."
 
-- Show the implementation PR
+- Show the implementation PR (live or backup):
+
+```bash
+# Find implementation PRs
+gh pr list -R RealPage/lumina-agents-mcp --limit 5
+```
 
 > "Here's the PR. Code changes, tests, the whole thing. The agent wrote implementation code following the project's existing patterns, added unit tests, and opened a PR referencing the story issue."
 
-- **Switch to terminal** and run:
+- Switch to terminal:
 
 ```bash
+# Show the agent's reasoning — full transparency
 gh aw logs
 ```
 
@@ -414,12 +538,22 @@ gh aw logs
 > "This is full transparency. No black box. The agent's entire thought process is logged and accessible from your terminal."
 
 **Step 6: Validation** (3 min)
-- Add the `needs-validation` label to the implementation PR
-- Navigate to Actions → show validation workflow running (or show pre-completed)
+
+```bash
+# Add the needs-validation label to the implementation PR
+gh pr edit <PR_NUMBER> -R RealPage/lumina-agents-mcp --add-label "needs-validation"
+```
+
+- Switch to browser: [Actions tab](https://github.com/RealPage/lumina-agents-mcp/actions) — show the Validation workflow triggering
 
 > "Now I add the `needs-validation` label. A separate validation agent — completely independent from the one that wrote the code — reads the PR, traces back to the story and the original PRD, and validates the implementation against the acceptance criteria."
 
-- Show the validation comment on the PR:
+- Show the validation comment on the PR (live or backup):
+
+```bash
+# Check for the validation comment
+gh pr view <PR_NUMBER> -R RealPage/lumina-agents-mcp --comments
+```
 
 > "Look at this validation report. It's a checklist — each acceptance criterion from the PRD with a pass/fail. Summary, gaps identified, overall recommendation. This is your automated code review against the spec.
 >
@@ -459,7 +593,13 @@ Bridge directly from RADD's Sentry pipeline. Be explicit about the parallel.
 ### Live Demo Steps
 
 **Step 1: Open the auto-remediation workflow** (2 min)
-- Open `shared/auto-remediation.md` in terminal or editor
+- Switch to **terminal tab 1** (agentics)
+
+```bash
+# Show the shared auto-remediation workflow
+cat workflows/auto-remediation.md | head -50
+```
+
 - Walk through the five stages:
 
 > "You built a custom pipeline to go from Sentry alert to AI fix to PR. Here's gh-aw's equivalent."
@@ -477,22 +617,30 @@ Walk through each stage:
 > **Stage 5: Summary.** A workflow summary with everything that happened — errors discovered, issues created, PRs opened, duplicates skipped."
 
 **Step 2: Show the consumer stub** (1 min)
-- Open `workflows/auto-remediation.md`
+
+```bash
+# Show the consumer stub — this is ALL a team puts in their repo
+cat examples/auto-remediation.md
+```
 
 > "Here's all a team needs to add to their repo — 26 lines. Declares the hourly schedule trigger, the manual dispatch inputs for overrides and dry-run mode, and the import. That's it. Add this file, set three secrets — `SERVICE_NAME`, `ELASTIC_MCP_URL`, `ELASTIC_MCP_API_KEY` — run `gh aw compile`, and your repo has automated error remediation."
 
 **Step 3: Swapping Elastic for Sentry** (1 min)
 
-> "You use Sentry. This workflow uses Elastic. The swap is straightforward — you'd replace the Elastic MCP server with a Sentry MCP server in the `mcp-servers:` block and adjust the query instructions. The pattern is identical: discover errors, triage, fix, PR. The data source is pluggable."
+```bash
+# Show the MCP server configuration in the shared workflow
+grep -A4 "mcp-servers:" workflows/auto-remediation.md
+```
 
-- Point to the `mcp-servers:` section in the frontmatter
-
-> "MCP servers are configured right here in the frontmatter. Swap Elastic for Sentry, recompile, done. You could even run both — Elastic for infrastructure logs, Sentry for application errors."
+> "You use Sentry. This workflow uses Elastic. The swap is straightforward — you'd replace the Elastic MCP server with a Sentry MCP server in the `mcp-servers:` block and adjust the query instructions. The pattern is identical: discover errors, triage, fix, PR. The data source is pluggable.
+>
+> MCP servers are configured right here in the frontmatter. Swap Elastic for Sentry, recompile, done. You could even run both — Elastic for infrastructure logs, Sentry for application errors."
 
 **Step 4: `gh aw audit` — the audit trail** (1 min)
-- In terminal, run:
+- Switch to **terminal tab 2** (lumina-agents-mcp)
 
 ```bash
+# Show the full audit trail of agent actions on this repo
 gh aw audit
 ```
 
@@ -558,7 +706,7 @@ Reinforce the lego-block philosophy. Show this audience they wouldn't be locked 
 **Share links:**
 - [gh-aw Documentation](https://github.github.com/gh-aw/)
 - [github/gh-aw Repository](https://github.com/github/gh-aw) (3.7k stars, MIT license)
-- [gh-aw-shared-workflows](https://github.com/RealPage/gh-aw-shared-workflows) (our shared workflows)
+- [agentics](https://github.com/RealPage/agentics) (our shared workflows)
 - [Agentics Template](https://github.com/githubnext/agentics-template) (starter template)
 - [Agentics Sample Pack](https://github.com/githubnext/agentics) (50+ workflows)
 - [Agent Factory Blog Series](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)
@@ -619,17 +767,47 @@ Reinforce the lego-block philosophy. Show this audience they wouldn't be locked 
 
 ## Backup Plan: If Live Demos Take Too Long
 
-Agent runs typically take 2-5 minutes each. The full pipeline in Segment 5 involves multiple runs.
+Agent runs typically take 3-5 minutes each (implementation can take 10-15 min). The full pipeline in Segment 5 involves multiple sequential runs.
 
 **Strategy:**
-1. **Trigger the feature idea live** — file the issue, show the workflow start. This takes seconds.
-2. **Switch to pre-completed run** — "Here's one I prepared earlier." Walk through the artifacts: PRD PR, decomposed issues with priority labels, implementation PR, validation comment.
-3. **Check back on the live run** — if it finishes during a later segment, show it briefly: "And our live run just completed — same results."
+1. **Trigger the feature idea live** — run the `gh issue create` command, show the workflow start in Actions. This takes seconds.
+2. **Switch to pre-completed run** — "Here's one I prepared earlier." Walk through the artifacts using these commands:
 
-**Pre-complete before the demo:**
-- Run the full pipeline on `lumina-agents-mcp` with a test feature idea
-- Screenshot or bookmark: PRD PR, epic issue, story issues, implementation PR, validation comment
-- Keep the browser tabs open for quick switching
+```bash
+# Show pre-completed PRD PR (replace numbers from pre-run)
+gh pr view <PRD_PR_NUMBER> -R RealPage/lumina-agents-mcp --web
+
+# Show decomposed issues
+gh issue list -R RealPage/lumina-agents-mcp --label epic
+gh issue list -R RealPage/lumina-agents-mcp --label story
+
+# Show implementation PR
+gh pr view <IMPL_PR_NUMBER> -R RealPage/lumina-agents-mcp --web
+
+# Show validation comments
+gh pr view <IMPL_PR_NUMBER> -R RealPage/lumina-agents-mcp --comments
+```
+
+3. **Check back on the live run** during a later segment:
+
+```bash
+# Quick check — did our live run finish?
+gh run list -R RealPage/lumina-agents-mcp --limit 3
+```
+
+> "And our live run just completed — same results."
+
+**Timing reference from actual runs on lumina-agents-mcp:**
+
+| Workflow | Typical Duration |
+|----------|-----------------|
+| PRD Generation | 3-5 min |
+| Decomposition | 5-8 min |
+| Skill Selection | 3-5 min |
+| MCP Selection | 3-5 min |
+| Implementation | 10-15 min |
+| Validation | 3-5 min |
+| Daily Repo Status | 3-4 min |
 
 ---
 
