@@ -57,7 +57,7 @@ safe-inputs:
       curl -s -X POST "$ELASTIC_ESQL_URL" \
         -H "Authorization: ApiKey $ELASTIC_API_KEY" \
         -H "Content-Type: application/json" \
-        -d "{\"query\": \"$INPUT_QUERY\"}"
+        -d "$(jq -n --arg query "$INPUT_QUERY" '{query:$query}')"
     env:
       ELASTIC_ESQL_URL: ${{ vars.ELASTIC_ESQL_URL }}
       ELASTIC_API_KEY: ${{ secrets.ELASTIC_MCP_API_KEY }}
@@ -66,7 +66,8 @@ safe-inputs:
     description: "Fetch Kibana advanced settings to verify prerequisites (e.g. Elastic Agent Builder)."
     inputs: {}
     run: |
-      curl -s "$KIBANA_BASE_URL/api/kibana/settings" \
+      curl -sS --fail-with-body -w '\nHTTP_STATUS:%{http_code}\n' \
+        "$KIBANA_BASE_URL/api/kibana/settings" \
         -H "kbn-xsrf: true" \
         -H "Authorization: ApiKey $ELASTIC_API_KEY"
     env:
@@ -86,6 +87,8 @@ safe-outputs:
       - "setup"
       - "priority:critical"
       - "priority:high"
+      - "priority:medium"
+      - "priority:low"
       - "type:syntax"
       - "type:runtime"
       - "type:type"

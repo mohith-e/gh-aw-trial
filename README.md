@@ -37,7 +37,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `skill-selection` | Pulls coding skills for your stack | Merge a PRD PR to main |
 | `mcp-selection` | Configures data sources for agents | Merge a PRD PR to main |
 | `validation` | Checks code against PRD criteria | Label a PR `needs-validation` |
-| `auto-remediation` | Finds errors in logs, opens fix PRs | Hourly schedule or manual |
+| `auto-remediation` | Finds errors in logs, opens fix PRs | Every 2 hours (looks back 2 hrs) or manual |
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 
@@ -47,6 +47,23 @@ gh aw add RealPage/agentics/prd-generation
 gh aw add RealPage/agentics/decomposition
 gh aw add RealPage/agentics/validation
 ```
+
+### Adding auto-remediation
+
+The auto-remediation workflow requires several inputs (Elastic endpoints, Kibana config, etc.). Use the `add-wizard` command to walk through setup interactively. Pass the tag ref so it locks to a specific version instead of a commit hash:
+
+```bash
+# Make sure your checkout is clean and on main
+git status
+git checkout main
+
+# Run the wizard — it will add the workflow and create a PR for review
+gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.2.0
+```
+
+The wizard will prompt for your service name, Kibana base URL, data view ID, and other inputs. Once complete, it creates a PR that can be reviewed and merged.
+
+> **Important:** On a scheduled run, there's no one to provide inputs. Required inputs without defaults (`service_name`, `kibana_base_url`, `kibana_data_view_id`) won't have values. To fix this, edit your local `.github/workflows/auto-remediation.md` and add `default:` values for your team's configuration. Since `gh aw update` does a 3-way merge, your defaults will be preserved on future updates.
 
 > See [docs/workflows.md](docs/workflows.md) for detailed documentation, pipeline diagrams, and how workflows chain together.
 
@@ -94,15 +111,22 @@ This repo uses semver tags. Pin to a specific version in production (e.g., `@v0.
 
 ### Updating workflows in your repo
 
-Bump the version ref in your stubs and recompile:
-
-```yaml
-imports:
-  - RealPage/agentics/workflows/prd-generation.md@v0.2.0
-```
+Use `gh aw update` to pull the latest version and update the pinned SHA:
 
 ```bash
-gh aw compile
-git add .github/
-git commit -m "Update agentic workflows to v0.2.0"
+gh aw update auto-remediation
+```
+
+To target a specific tag:
+
+```bash
+gh aw update auto-remediation --ref v0.3.0
+```
+
+By default, `update` does a 3-way merge — your local changes are preserved and merged with upstream changes. So your customizations won't be overwritten.
+
+If you ever want to discard local changes and take the upstream version exactly:
+
+```bash
+gh aw update auto-remediation --no-merge
 ```
