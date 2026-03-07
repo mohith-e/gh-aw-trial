@@ -4,19 +4,23 @@ Detailed documentation for all agentic workflows in this repo.
 
 ## Pipelines
 
-- [Feature Development Pipeline](feature-development-pipeline.md) — Chains multiple workflows to automate idea → PRD → stories → implementation → validation
-- [Auto-Remediation Pipeline](auto-remediation.md) — Discovers errors from production logs, triages with AI, and opens fix PRs
+These are end-to-end workflows that chain multiple agents together:
+
+- [PRD-Driven Delivery](workflows/prd-driven-delivery.md) — idea → PRD → stories → implementation → validation
+- [Story-Driven Delivery](workflows/story-driven-delivery.md) — idea → opportunity → user activities → stories → implementation → validation
+- [Auto-Remediation](workflows/auto-remediation.md) — errors logged → errors triaged → issue created → PR with fix
 
 ## Individual Workflows
 
 | Workflow | Trigger | What It Does |
 |----------|---------|-------------|
 | [prd-generation](../workflows/prd-generation.md) | Issue labeled `feature-idea` | Generates a PRD from a feature idea, opens a PR |
-| [decomposition](../workflows/decomposition.md) | PRD merged to main | Breaks PRD into epic + story issues with priority labels |
+| [prd-decomposition](../workflows/prd-decomposition.md) | PRD merged to main | Breaks PRD into epic + story issues with priority labels |
+| [story-decomposition](../workflows/story-decomposition.md) | Issue labeled `ready-for-decomposition` | Breaks a story into implementation sub-issues |
 | [skill-selection](../workflows/skill-selection.md) | PRD merged to main | Fetches coding skills from `RealPage/ai-coding-toolkit` |
 | [mcp-selection](../workflows/mcp-selection.md) | PRD merged to main | Configures MCP servers in the implementation workflow |
 | [validation](../workflows/validation.md) | PR labeled `needs-validation` | Validates implementation against PRD acceptance criteria |
-| [auto-remediation](../workflows/auto-remediation.md) | Hourly schedule / manual | Queries Elastic for errors, triages, creates issues, opens fix PRs |
+| [auto-remediation](../workflows/auto-remediation.md) | Every 2 hours / manual | Queries Elastic for errors, triages, creates issues, assigns Copilot |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 

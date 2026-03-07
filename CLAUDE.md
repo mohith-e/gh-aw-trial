@@ -41,7 +41,8 @@ The markdown body contains natural language instructions that Claude agents foll
 | Workflow | Trigger | What It Does |
 |----------|---------|-------------|
 | `prd-generation` | Issue labeled `feature-idea` | Generates a PRD from a feature idea, opens a PR |
-| `decomposition` | PRD merged to main | Breaks PRD into epic + story issues with priority labels |
+| `prd-decomposition` | PRD merged to main | Breaks PRD into epic + story issues with priority labels |
+| `story-decomposition` | Issue labeled `ready-for-decomposition` | Breaks a story into implementation sub-issues |
 | `skill-selection` | PRD merged to main | Fetches coding skills from `RealPage/ai-coding-toolkit` |
 | `mcp-selection` | PRD merged to main | Configures MCP servers in the implementation workflow |
 | `validation` | PR labeled `needs-validation` | Validates implementation against PRD acceptance criteria |
