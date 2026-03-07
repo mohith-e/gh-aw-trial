@@ -31,7 +31,8 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | Workflow | What it does | How to trigger |
 |----------|-------------|----------------|
 | `prd-generation` | Writes a PRD from a feature idea | Label an issue `feature-idea` |
-| `decomposition` | Breaks a PRD into epic + stories | Merge a PRD PR to main |
+| `prd-decomposition` | Breaks a PRD into epic + stories | Merge a PRD PR to main |
+| `story-decomposition` | Breaks a story into implementation sub-issues | Label an issue `ready-for-decomposition` |
 | `skill-selection` | Pulls coding skills for your stack | Merge a PRD PR to main |
 | `mcp-selection` | Configures data sources for agents | Merge a PRD PR to main |
 | `validation` | Checks code against PRD criteria | Label a PR `needs-validation` |
@@ -42,7 +43,7 @@ Pick and choose. You don't need all of them — add only what's useful for your 
 ```bash
 # Add several at once
 gh aw add-wizard RealPage/agentics/workflows/prd-generation.md@v0.2.0
-gh aw add-wizard RealPage/agentics/workflows/decomposition.md@v0.2.0
+gh aw add-wizard RealPage/agentics/workflows/prd-decomposition.md@v0.2.0
 gh aw add-wizard RealPage/agentics/workflows/validation.md@v0.2.0
 ```
 

@@ -1,8 +1,8 @@
-# Feature Development Pipeline
+# PRD-Driven Delivery
 
 Automates the full feature lifecycle — from idea to validated PR — by chaining multiple workflows together through GitHub events.
 
-## How It Works
+## Pipeline
 
 ```mermaid
 flowchart TD
@@ -46,17 +46,17 @@ Each stage is a separate workflow. They chain through GitHub events — one work
 Reads the issue description and generates a Product Requirements Document using the template at `docs/prds/templates/prd-template.md`. Opens a PR with the draft PRD for human review.
 
 ```bash
-gh aw add RealPage/agentics/prd-generation
+gh aw add-wizard RealPage/agentics/workflows/prd-generation.md@v0.2.0
 ```
 
 ### 2. Decomposition
 
 **Trigger:** PRD merged to main
 
-Breaks the PRD into an epic and individual stories as GitHub Issues. Stories are prioritized (P0/P1/P2) based on the PRD's classification and labeled for implementation.
+Breaks the PRD into an epic and individual stories as GitHub Issues. Stories are prioritized (P0/P1/P2) based on the PRD's classification and labeled for implementation. P0 stories with no dependencies get labeled `ready-for-implementation` automatically.
 
 ```bash
-gh aw add RealPage/agentics/decomposition
+gh aw add-wizard RealPage/agentics/workflows/prd-decomposition.md@v0.2.0
 ```
 
 ### 3. Skill Selection
@@ -66,7 +66,7 @@ gh aw add RealPage/agentics/decomposition
 Analyzes the PRD's technical requirements and pulls relevant coding skills from [RealPage/ai-coding-toolkit](https://github.com/RealPage/ai-coding-toolkit) into your repo's `.claude/skills/` directory. These skills give implementation agents best practices for your stack.
 
 ```bash
-gh aw add RealPage/agentics/skill-selection
+gh aw add-wizard RealPage/agentics/workflows/skill-selection.md@v0.2.0
 ```
 
 ### 4. MCP Selection
@@ -76,7 +76,7 @@ gh aw add RealPage/agentics/skill-selection
 Configures MCP servers (BigQuery, Brave Search, Datadog, etc.) in your implementation workflow so agents have access to the right data sources and tools during development.
 
 ```bash
-gh aw add RealPage/agentics/mcp-selection
+gh aw add-wizard RealPage/agentics/workflows/mcp-selection.md@v0.2.0
 ```
 
 ### 5. Implementation
@@ -92,7 +92,7 @@ This workflow is **project-specific** and not included in this library — it re
 Validates the implementation against the PRD's acceptance criteria. Posts a checklist on the PR showing which criteria pass or fail, with a recommendation to approve, request changes, or discuss.
 
 ```bash
-gh aw add RealPage/agentics/validation
+gh aw add-wizard RealPage/agentics/workflows/validation.md@v0.2.0
 ```
 
 ## Prerequisites
@@ -109,7 +109,7 @@ Get the PRD template:
 
 ```bash
 mkdir -p docs/prds/templates
-curl -sL "https://raw.githubusercontent.com/RealPage/agentics/v0.1.0/docs/prds/templates/prd-template.md" \
+curl -sL "https://raw.githubusercontent.com/RealPage/agentics/v0.2.0/docs/prds/templates/prd-template.md" \
   -o docs/prds/templates/prd-template.md
 ```
 
