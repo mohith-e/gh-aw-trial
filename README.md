@@ -100,13 +100,18 @@ Want to improve these workflows for everyone?
 3. Test by pointing a consumer repo's stub at your branch: `@my-branch`
 4. Open a PR — once merged and tagged, all consumers can bump their version ref
 
-### Versioning
+All commits must follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard. A CI check enforces this on every PR.
 
-This repo uses semver tags. Pin to a specific version in production (e.g., `@v0.1.0`). Use `@main` only during development.
+### Versioning and Releases
 
-- **Patch** (`v0.1.1`) — bug fixes to workflow instructions
-- **Minor** (`v0.2.0`) — new workflows or non-breaking enhancements
-- **Major** (`v1.0.0`) — breaking changes
+This repo uses [release-please](https://github.com/googleapis/release-please) to automate releases. When a PR is merged to `main`, release-please opens a release PR that bumps the version and updates the changelog based on your commit messages. Merge that PR to cut a new GitHub release and tag.
+
+Semver rules for commit types:
+- **Patch** (`fix:`) — bug fixes to workflow instructions
+- **Minor** (`feat:`) — new workflows or non-breaking enhancements
+- **Major** (`feat!:` or `BREAKING CHANGE:` footer) — breaking changes
+
+Pin to a specific version in production (e.g., `@v0.1.0`). Use `@main` only during development.
 
 ### Updating workflows in your repo
 
