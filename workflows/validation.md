@@ -1,4 +1,5 @@
 ---
+on: pull_request
 engine: claude
 
 safe-outputs:
