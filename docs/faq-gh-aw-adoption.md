@@ -18,7 +18,7 @@ No. gh aw runs on existing GitHub Actions runners. No servers to stand up or mai
 
 ## What about security?
 
-We inherit GitHub's permissions model, secrets management, and audit logging — a battle-tested foundation. This is safer than building our own agentic security layer, and much safer to extend over time.
+gh aw has a [purpose-built security architecture](https://github.github.com/gh-aw/introduction/architecture/) for AI agents. Agents run in network-isolated containers with domain allowlists. They never get write permissions — all writes (creating issues, opening PRs) go through separate validated jobs via SafeOutputs. Content is sanitized before agents see it, secrets are automatically redacted from output, and an independent threat detection pipeline blocks results if it finds anything malicious. This is far beyond what we could reasonably build and maintain ourselves.
 
 ## How does this handle test environments and test data?
 

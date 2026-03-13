@@ -12,7 +12,7 @@ Use GitHub Agentic Workflows (gh aw) as the shared platform for AI-powered SDLC 
 
 1. **Zero new infrastructure.** Runs on existing GitHub Actions runners. No servers to provision or maintain.
 2. **GitHub is the strategic direction.** IT has identified GitHub as the preferred platform. Microsoft's investment (Copilot, Actions, gh CLI) is clearly focused on GitHub, while TFS/Azure DevOps is in maintenance mode.
-3. **Inherited security.** GitHub's permissions model, secrets management, and audit logging provide a battle-tested foundation. Safer than rolling our own agentic security layer, and safer to extend over time.
+3. **Purpose-built agentic security.** gh aw provides a [three-layer security architecture](https://github.github.com/gh-aw/introduction/architecture/) designed specifically for AI agents: network-isolated containers with domain allowlists, permission separation (agents never get write access — all writes go through validated SafeOutput jobs), content sanitization, secret redaction, and an independent threat detection pipeline that blocks output if it finds malicious patches or leaked credentials. Building this ourselves would be a massive undertaking; extending gh aw's model over time is far safer.
 4. **Free improvements.** Building on a shared platform means we automatically benefit from gh aw enhancements without additional investment.
 5. **Shared workflow library.** Reusable markdown-based workflow definitions that any repo can import. One improvement benefits every consumer.
 6. **Low barrier to entry.** Users interact through issue forms and PR reviews — no prompt engineering, CLI, or IDE setup required.
