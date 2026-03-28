@@ -3,30 +3,41 @@ description: |
   Automated error remediation workflow. Discovers production errors from Elastic
   APM logs, triages by severity/category, performs root cause analysis, creates
   GitHub issues with fix suggestions, and assigns Copilot for PR generation.
-  Generic — configure inputs for your service, Kibana space, and data view.
+  Generic — configure the env section below for your service, Kibana space, and data view.
 
+# Schedule runs every 2 hours automatically; workflow_dispatch allows manual runs on demand.
+# Both triggers use the same env: configuration — no separate input handling needed.
+# Pattern reference: https://github.github.com/gh-aw/reference/frontmatter/#triggers
 on:
   schedule: "every 2 hours"
   workflow_dispatch:
-    inputs:
-      service_name:
-        description: "APM service name in the log index (e.g. agent_leasing, cai_genai_service)"
-        required: true
-      lookback_hours:
-        description: "How far back to search for errors"
-        default: "2"
-      error_limit:
-        description: "Max error groups to return"
-        default: "20"
-      kibana_base_url:
-        description: "Kibana base URL including space prefix (e.g. https://rp-central-log.kb.us-east-2.aws.elastic-cloud.com:9243/s/mlops)"
-        required: true
-      kibana_data_view_id:
-        description: "Kibana data view ID for the APM logs (e.g. apm_static_data_view_id_mlops)"
-        required: true
-      title_prefix:
-        description: "Optional prefix for issue titles (e.g. 'KNCK-00000 ')"
-        default: ""
+
+# ── Service configuration ──────────────────────────────────────────────────────
+#
+# WHY env: instead of workflow_dispatch.inputs with defaults?
+#
+# GitHub Actions only populates inputs.* for workflow_dispatch triggers.
+# On schedule triggers, inputs.* is empty — workflow_dispatch default: values
+# are UI-only and have no effect at runtime. Using workflow-level env: is the
+# canonical gh-aw pattern for config that applies to both schedule and manual runs.
+#
+# Examples from gh-aw docs that use this pattern:
+#   - daily-repo-status: https://github.github.com/gh-aw/patterns/trial-ops/
+#   - See also: https://github.github.com/gh-aw/reference/environment-variables/
+#
+# After import, edit SERVICE_NAME, KIBANA_BASE_URL, KIBANA_DATA_VIEW_ID, and TITLE_PREFIX.
+# Then run `gh aw compile` to regenerate the lock file.
+# Verify setup by triggering workflow_dispatch manually — it uses the same env values as schedule.
+# ──────────────────────────────────────────────────────────────────────────────
+env:
+  # ── Required: configure these for your service ────────────────────────────
+  SERVICE_NAME: "YOUR_SERVICE_NAME"         # APM dataset name, e.g. agent_leasing
+  KIBANA_BASE_URL: "https://rp-central-log.kb.us-east-2.aws.elastic-cloud.com:9243/s/YOUR_KIBANA_SPACE"  # replace YOUR_KIBANA_SPACE, e.g. mlops
+  KIBANA_DATA_VIEW_ID: "YOUR_DATA_VIEW_ID"  # e.g. apm_static_data_view_id_mlops
+  TITLE_PREFIX: ""                           # optional issue title prefix, e.g. "MYTEAM-00000 "
+  # ── Sensible defaults — adjust if needed ─────────────────────────────────
+  LOOKBACK_HOURS: "2"
+  ERROR_LIMIT: "20"
 
 permissions:
   contents: read
@@ -71,12 +82,12 @@ safe-inputs:
         -H "kbn-xsrf: true" \
         -H "Authorization: ApiKey $ELASTIC_API_KEY"
     env:
-      KIBANA_BASE_URL: ${{ inputs.kibana_base_url }}
+      KIBANA_BASE_URL: ${{ env.KIBANA_BASE_URL }}
       ELASTIC_API_KEY: ${{ secrets.ELASTIC_MCP_API_KEY }}
 
 safe-outputs:
   create-issue:
-    title-prefix: ${{ inputs.title_prefix }}
+    title-prefix: ${{ env.TITLE_PREFIX }}
     labels: [auto-remediation]
     max: 6
   add-labels:
@@ -111,7 +122,7 @@ timeout-minutes: 10
 
 # Auto-Remediator
 
-You are an automated error remediation agent for the `${{ inputs.service_name }}` service. Your job is to discover production errors from Elastic APM logs, triage them, perform root cause analysis, create GitHub issues, and assign Copilot to generate fixes.
+You are an automated error remediation agent for the `${{ env.SERVICE_NAME }}` service. Your job is to discover production errors from Elastic APM logs, triage them, perform root cause analysis, create GitHub issues, and assign Copilot to generate fixes.
 
 Execute the following pipeline in order. If any step finds zero results, stop early and report that no new errors were found.
 
@@ -135,7 +146,7 @@ The auto-remediator workflow requires the **Elastic Agent Builder** feature to b
 
 ### Steps to Enable
 
-1. Open your Kibana deployment (e.g. `${{ inputs.kibana_base_url }}`).
+1. Open your Kibana deployment (e.g. `${{ env.KIBANA_BASE_URL }}`).
 2. In the left sidebar, navigate to **Stack Management**.
 3. Scroll down to the **AI** section in the left menu.
 4. Click **Agent Builder**.
@@ -152,7 +163,7 @@ The Elastic Agent Builder provides AI-powered tooling that the auto-remediator r
 
 - **Setting key:** `agentBuilder:enabled`
 - **Location:** Stack Management → AI → Agent Builder
-- **Kibana URL:** `${{ inputs.kibana_base_url }}/app/management/ai/agentBuilder`
+- **Kibana URL:** `${{ env.KIBANA_BASE_URL }}/app/management/ai/agentBuilder`
 - **Status:** TECHNICAL PREVIEW
 
 ### After Enabling
@@ -164,12 +175,12 @@ Add the labels `auto-remediation` and `setup` to this issue using the `add-label
 
 ## Step 1: Error Discovery
 
-Query Elastic for ERROR-level application logs from the last ${{ inputs.lookback_hours }} hours using the `execute-esql` safe-input tool.
+Query Elastic for ERROR-level application logs from the last ${{ env.LOOKBACK_HOURS }} hours using the `execute-esql` safe-input tool.
 
 Call `execute-esql` with this query:
 
 ```
-FROM logs-apm.app.${{ inputs.service_name }}-default | WHERE @timestamp > NOW() - ${{ inputs.lookback_hours }} hours AND log.level == "ERROR" | EVAL event_start = LOCATE(message, "\"event\":\"") | EVAL event_end = LOCATE(message, "\",", event_start + 9) | EVAL event = CASE(event_start > 0 AND event_end > 0, SUBSTRING(message, event_start + 9, event_end - event_start - 9), message) | EVAL logger_start = LOCATE(message, "\"logger\":\"") | EVAL logger_end = LOCATE(message, "\"", logger_start + 10) | EVAL logger = CASE(logger_start > 0 AND logger_end > 0, SUBSTRING(message, logger_start + 10, logger_end - logger_start - 10), "unknown") | STATS occurrence_count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), sample_message = MAX(message) BY event, logger | SORT occurrence_count DESC | LIMIT ${{ inputs.error_limit }}
+FROM logs-apm.app.${{ env.SERVICE_NAME }}-default | WHERE @timestamp > NOW() - ${{ env.LOOKBACK_HOURS }} hours AND log.level == "ERROR" | EVAL event_start = LOCATE(message, "\"event\":\"") | EVAL event_end = LOCATE(message, "\",", event_start + 9) | EVAL event = CASE(event_start > 0 AND event_end > 0, SUBSTRING(message, event_start + 9, event_end - event_start - 9), message) | EVAL logger_start = LOCATE(message, "\"logger\":\"") | EVAL logger_end = LOCATE(message, "\"", logger_start + 10) | EVAL logger = CASE(logger_start > 0 AND logger_end > 0, SUBSTRING(message, logger_start + 10, logger_end - logger_start - 10), "unknown") | STATS occurrence_count = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp), sample_message = MAX(message) BY event, logger | SORT occurrence_count DESC | LIMIT ${{ env.ERROR_LIMIT }}
 ```
 
 **ES|QL syntax rules:**
@@ -184,7 +195,7 @@ After retrieving results:
 - Deduplicate by `event` — if multiple rows share the same `event`, keep only the one with the highest `occurrence_count`
 - Keep at most **5 unique errors** to process
 
-If no errors remain after filtering, stop and report: "No new production errors found in the last ${{ inputs.lookback_hours }} hours."
+If no errors remain after filtering, stop and report: "No new production errors found in the last ${{ env.LOOKBACK_HOURS }} hours."
 
 ## Step 2: Triage and Root Cause Analysis
 
@@ -257,7 +268,7 @@ For each **new** error (no existing issue), create a GitHub issue using the `cre
 | **Logger** | `{logger}` |
 | **Severity** | {severity} |
 | **Category** | {category} |
-| **Occurrences** | {occurrence_count} in the last ${{ inputs.lookback_hours }} hours |
+| **Occurrences** | {occurrence_count} in the last ${{ env.LOOKBACK_HOURS }} hours |
 | **First Seen** | {first_seen} |
 | **Last Seen** | {last_seen} |
 | **Confidence** | {confidence} |
@@ -265,7 +276,7 @@ For each **new** error (no existing issue), create a GitHub issue using the `cre
 
 ## Logs
 
-[View in Kibana](${{ inputs.kibana_base_url }}/app/discover#/?_g=(time:(from:'{first_seen}',to:'{last_seen}'))&_a=(dataSource:(dataViewId:${{ inputs.kibana_data_view_id }},type:dataView),query:(language:kuery,query:'log.level: "ERROR" AND labels.event: "{event}"')))
+[View in Kibana](${{ env.KIBANA_BASE_URL }}/app/discover#/?_g=(time:(from:'{first_seen}',to:'{last_seen}'))&_a=(dataSource:(dataViewId:${{ env.KIBANA_DATA_VIEW_ID }},type:dataView),query:(language:kuery,query:'log.level: "ERROR" AND labels.event: "{event}"')))
 
 ## Root Cause
 
