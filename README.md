@@ -62,7 +62,7 @@ gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.2.0
 
 The wizard will prompt for your service name, Kibana base URL, data view ID, and other inputs. Once complete, it creates a PR that can be reviewed and merged.
 
-> **Important:** On a scheduled run, there's no one to provide inputs. Required inputs without defaults (`service_name`, `kibana_base_url`, `kibana_data_view_id`) won't have values. To fix this, edit your local `.github/workflows/auto-remediation.md` and add `default:` values for your team's configuration. Since `gh aw update` does a 3-way merge, your defaults will be preserved on future updates.
+> **Important:** GitHub Actions does not populate `inputs.*` on scheduled runs — `workflow_dispatch` input defaults are UI-only and have no runtime effect. This workflow uses a workflow-level `env:` block instead, which applies to both schedule and manual dispatch. After import, open `.github/workflows/auto-remediation.md` and fill in `SERVICE_NAME`, `KIBANA_BASE_URL`, `KIBANA_DATA_VIEW_ID`, and `TITLE_PREFIX` in the `env:` section at the top. Then run `gh aw compile`. Since `gh aw update` does a 3-way merge, your values will be preserved on future updates.
 
 > See [docs/workflows.md](docs/workflows.md) for detailed documentation, pipeline diagrams, and how workflows chain together.
 
@@ -134,3 +134,5 @@ If you ever want to discard local changes and take the upstream version exactly:
 ```bash
 gh aw update auto-remediation --no-merge
 ```
+
+
