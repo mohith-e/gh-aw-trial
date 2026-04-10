@@ -81,22 +81,29 @@ gh aw compile fortify-fix
 
 ### 2. Configure the Fortify release ID
 
-Edit `fortify-triage.md` and replace the hardcoded release ID (`1663419`) in the pre-step `run:` block with your Fortify release ID. This appears in the API URLs:
+Set the Fortify release ID as a repository secret (gh-aw does not allow `vars.*` in expressions, so we use a secret even though the release ID is not sensitive):
 
+```bash
+gh secret set FOD_RELEASE_ID --body "<YOUR_RELEASE_ID>"
 ```
-https://api.ams.fortify.com/api/v3/releases/<YOUR_RELEASE_ID>
-```
 
-### 3. Configure authentication
+Alternatively, pass `fod_release_id` as a `workflow_dispatch` input for ad-hoc runs. The workflow_dispatch input takes precedence over the secret.
 
-Edit the pre-step `run:` block to use your Fortify credentials (username format).
-
-### 4. Add repository secrets
+### 3. Add repository secrets
 
 | Secret | Description |
 |--------|-------------|
+| `FOD_USERNAME` | Fortify on Demand username (e.g., `Real_Page\your.user`) |
 | `FOD_PAT` | Fortify on Demand personal access token |
+| `FOD_RELEASE_ID` | Fortify on Demand release ID (see above) |
 | `ANTHROPIC_API_KEY` | API key for the Claude engine |
+
+```bash
+gh secret set FOD_USERNAME
+gh secret set FOD_PAT
+gh secret set FOD_RELEASE_ID
+gh secret set ANTHROPIC_API_KEY
+```
 
 ### 5. Create labels
 
@@ -132,7 +139,7 @@ The current pre-step uses a personal access token (`FOD_PAT`) with password gran
 
 ### Add application name input to resolve release ID dynamically
 
-The Fortify release ID is currently hardcoded in the pre-step. A better approach would be to accept a `fortify_app_name` input and resolve the release ID dynamically via the Fortify API:
+The Fortify release ID is currently supplied via the `FOD_RELEASE_ID` repo variable or a `workflow_dispatch` input. A better long-term approach would be to accept a `fortify_app_name` input and resolve the release ID dynamically via the Fortify API:
 
 1. Query `GET /api/v3/applications?filters=applicationName:<name>` to get the application ID
 2. Query `GET /api/v3/applications/<appId>/releases?filters=sdlcStatusType:Production` to get the active release ID

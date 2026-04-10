@@ -11,6 +11,11 @@ on:
     branches: [master]
   schedule: weekly
   workflow_dispatch:
+    inputs:
+      fod_release_id:
+        description: "Fortify on Demand release ID to triage"
+        required: true
+        type: string
 
 engine: claude
 
@@ -35,12 +40,22 @@ steps:
   - name: Fetch Fortify vulnerabilities
     env:
       FOD_PAT: ${{ secrets.FOD_PAT }}
+      FOD_USERNAME: ${{ secrets.FOD_USERNAME }}
+      FOD_RELEASE_ID: ${{ inputs.fod_release_id || secrets.FOD_RELEASE_ID }}
     run: |
-      echo "Authenticating to Fortify API..."
+      if [ -z "$FOD_USERNAME" ]; then
+        echo '{"error": "FOD_USERNAME secret is not set. Configure in repo settings."}' > fortify-data.json
+        exit 0
+      fi
+      if [ -z "$FOD_RELEASE_ID" ]; then
+        echo '{"error": "FOD_RELEASE_ID is not set. Provide via workflow_dispatch input or set the FOD_RELEASE_ID repository variable."}' > fortify-data.json
+        exit 0
+      fi
+      echo "Authenticating to Fortify API as $FOD_USERNAME..."
       FOD_TOKEN=$(curl --silent --request POST 'https://api.ams.fortify.com/oauth/token' \
         --form 'scope="api-tenant"' \
         --form 'grant_type="password"' \
-        --form 'username="Real_Page\\jdean"' \
+        --form "username=\"$FOD_USERNAME\"" \
         --form "password=\"$FOD_PAT\"" | jq -r '.access_token')
 
       if [ -z "$FOD_TOKEN" ] || [ "$FOD_TOKEN" = "null" ]; then
@@ -49,8 +64,8 @@ steps:
       fi
       echo "Authenticated successfully."
 
-      echo "Fetching release summary..."
-      curl --silent "https://api.ams.fortify.com/api/v3/releases/1663419" \
+      echo "Fetching release summary for release $FOD_RELEASE_ID..."
+      curl --silent "https://api.ams.fortify.com/api/v3/releases/$FOD_RELEASE_ID" \
         --header "Authorization: Bearer $FOD_TOKEN" \
         --header 'Accept: application/json' | jq '{
           releaseId: .releaseId,
@@ -77,7 +92,7 @@ steps:
         echo '{"items":[],"totalCount":0}' > fortify-vulns.json
         OFFSET=0
         while true; do
-          PAGE=$(curl --silent "https://api.ams.fortify.com/api/v3/releases/1663419/vulnerabilities?limit=50&offset=$OFFSET&orderBy=severityString&orderByDirection=DESC" \
+          PAGE=$(curl --silent "https://api.ams.fortify.com/api/v3/releases/$FOD_RELEASE_ID/vulnerabilities?limit=50&offset=$OFFSET&orderBy=severityString&orderByDirection=DESC" \
             --header "Authorization: Bearer $FOD_TOKEN" \
             --header 'Accept: application/json')
           PAGE_COUNT=$(echo "$PAGE" | jq '.items | length')
@@ -97,7 +112,7 @@ steps:
         mkdir -p fortify-details
         for VULN_ID in $(jq -r '.items[] | select(.severityString == "Critical" or .severityString == "High") | .vulnId' fortify-vulns.json); do
           echo "  Fetching details for vuln $VULN_ID..."
-          curl --silent "https://api.ams.fortify.com/api/v3/releases/1663419/vulnerabilities/$VULN_ID/details" \
+          curl --silent "https://api.ams.fortify.com/api/v3/releases/$FOD_RELEASE_ID/vulnerabilities/$VULN_ID/details" \
             --header "Authorization: Bearer $FOD_TOKEN" \
             --header 'Accept: application/json' > "fortify-details/$VULN_ID.json"
           sleep 0.5
@@ -117,7 +132,7 @@ You are a security triage agent for the `${{ github.repository }}` repository. Y
 
 - **Repository**: ${{ github.repository }}
 - **Scanner**: Fortify on Demand (SAST)
-- **Fortify Release ID**: 1663419
+- **Fortify Release ID**: Read from `fortify-summary.json` (`.releaseId` field)
 - **Triage Date**: $(date +%Y-%m-%d)
 
 ## Data Files
@@ -211,7 +226,7 @@ Create a summary issue titled `[Fortify Triage] Scan Results - $(date +%Y-%m-%d)
 ## Fortify SAST Triage Summary
 
 **Scan Date**: $(date +%Y-%m-%d)
-**Fortify Release**: 1663419
+**Fortify Release**: {releaseId from fortify-summary.json}
 **Star Rating**: {rating}/5
 **Total Vulnerabilities**: N
 
@@ -257,7 +272,7 @@ Label the summary issue with `fortify` and `triage-summary`.
    ```json
    {
      "noop": {
-       "message": "Fortify triage complete. No open vulnerabilities found for release 1663419."
+       "message": "Fortify triage complete. No open vulnerabilities found for the configured release."
      }
    }
    ```
