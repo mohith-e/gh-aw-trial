@@ -24,6 +24,7 @@ These are end-to-end workflows that chain multiple agents together:
 | [auto-remediation](../workflows/auto-remediation.md) | Every 2 hours / manual | Queries Elastic for errors, triages, creates issues, assigns Copilot |
 | [fortify-triage](../workflows/fortify-triage.md) | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
 | [fortify-fix](../workflows/fortify-fix.md) | Issue labeled `fortify-fix` | Reads the vulnerability issue, fixes the code, opens a focused PR linked to the issue |
+| [implement-issue](../workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, discovers the project stack, writes code and tests, runs validation, and opens a PR with a self-review. Generic crawl-tier implementation agent |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 

@@ -49,6 +49,7 @@ The markdown body contains natural language instructions that Claude agents foll
 | `auto-remediation` | Hourly schedule / manual | Queries Elastic for errors, triages, creates issues, opens fix PRs |
 | `fortify-triage` | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
 | `fortify-fix` | Issue labeled `fortify-fix` | Reads a Fortify vulnerability issue, fixes the code, opens a focused PR linked to the issue |
+| `implement-issue` | Issue labeled `agent:implement` | Reads an issue, discovers the project's stack, writes code and tests, runs validation, and opens a PR with a self-review |
 
 ## How Consumer Repos Use This
 
