@@ -104,6 +104,24 @@ Want to improve these workflows for everyone?
 
 All commits must follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard. A CI check enforces this on every PR.
 
+### Development Tooling
+
+This repo is set up for authoring workflows with GitHub Copilot Agent and VS Code:
+
+- **Copilot Agent dispatcher** — `.github/agents/agentic-workflows.agent.md` routes requests to the right gh-aw prompt (create, update, debug, upgrade). Open the repo in VS Code or GitHub Copilot and ask it to "create a new workflow" or "debug workflow X".
+- **VS Code MCP server** — `.vscode/mcp.json` connects the `gh aw mcp-server` so Copilot can call gh-aw tools directly.
+- **Copilot setup steps** — `.github/workflows/copilot-setup-steps.yml` installs the gh-aw CLI in Copilot Agent's environment.
+
+To set up a new repo for workflow authoring in the same way, run:
+
+```bash
+gh aw init
+```
+
+### Automated Documentation
+
+A `daily-doc-updater` workflow runs on this repo every day. It scans merged pull requests from the last 24 hours, identifies undocumented features, and opens documentation PRs automatically. You don't need to manually update `README.md` or `docs/workflows.md` for every change — the agent handles routine doc updates.
+
 ### Versioning and Releases
 
 This repo uses [release-please](https://github.com/googleapis/release-please) to automate releases. When a PR is merged to `main`, release-please opens a release PR that bumps the version and updates the changelog based on your commit messages. Merge that PR to cut a new GitHub release and tag.
