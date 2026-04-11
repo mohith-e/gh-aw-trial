@@ -6,6 +6,14 @@ Works out of the box in any repo because it discovers the project's stack and te
 
 ## Getting Started
 
+**From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
+
+```bash
+gh aw add-wizard RealPage/agentics/implement-issue
+```
+
+**From Claude Code or any non-interactive shell** (`add-wizard` requires a TTY, so use the non-interactive `add` instead):
+
 ```bash
 gh aw add RealPage/agentics/implement-issue
 ```
