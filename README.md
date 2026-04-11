@@ -37,6 +37,8 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `mcp-selection` | Configures data sources for agents | Merge a PRD PR to main |
 | `validation` | Checks code against PRD criteria | Label a PR `needs-validation` |
 | `auto-remediation` | Finds errors in logs, opens fix PRs | Every 2 hours (looks back 2 hrs) or manual |
+| `fortify-triage` | Pulls Fortify SAST findings, opens one issue per critical/high vuln | After Fortify scan completes, weekly, or manual |
+| `fortify-fix` | Reads a Fortify issue and opens a focused fix PR | Issue labeled `fortify-fix` |
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 

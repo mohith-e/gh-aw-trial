@@ -47,6 +47,8 @@ The markdown body contains natural language instructions that Claude agents foll
 | `mcp-selection` | PRD merged to main | Configures MCP servers in the implementation workflow |
 | `validation` | PR labeled `needs-validation` | Validates implementation against PRD acceptance criteria |
 | `auto-remediation` | Hourly schedule / manual | Queries Elastic for errors, triages, creates issues, opens fix PRs |
+| `fortify-triage` | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
+| `fortify-fix` | Issue labeled `fortify-fix` | Reads a Fortify vulnerability issue, fixes the code, opens a focused PR linked to the issue |
 
 ## How Consumer Repos Use This
 

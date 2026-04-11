@@ -9,6 +9,7 @@ These are end-to-end workflows that chain multiple agents together:
 - [PRD-Driven Delivery](workflows/prd-driven-delivery.md) — idea → PRD → stories → implementation → validation
 - [Story-Driven Delivery](workflows/story-driven-delivery.md) — idea → opportunity → user activities → stories → implementation → validation
 - [Auto-Remediation](workflows/auto-remediation.md) — errors logged → errors triaged → issue created → PR with fix
+- [Fortify Remediation](workflows/fortify-remediation.md) — SAST scan completes → vulnerabilities triaged → issue per finding → PR with fix
 
 ## Individual Workflows
 
@@ -21,6 +22,8 @@ These are end-to-end workflows that chain multiple agents together:
 | [mcp-selection](../workflows/mcp-selection.md) | PRD merged to main | Configures MCP servers in the implementation workflow |
 | [validation](../workflows/validation.md) | PR labeled `needs-validation` | Validates implementation against PRD acceptance criteria |
 | [auto-remediation](../workflows/auto-remediation.md) | Every 2 hours / manual | Queries Elastic for errors, triages, creates issues, assigns Copilot |
+| [fortify-triage](../workflows/fortify-triage.md) | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
+| [fortify-fix](../workflows/fortify-fix.md) | Issue labeled `fortify-fix` | Reads the vulnerability issue, fixes the code, opens a focused PR linked to the issue |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 
