@@ -90,6 +90,7 @@ safe-outputs:
   jobs:
     sf-comment:
       description: "Post a Chatter comment on a Salesforce PME record. Use this to write triage status or GitHub issue links back to Salesforce."
+      max: 15
       runs-on: ubuntu-latest
       output: "Comment posted to Salesforce PME record."
       inputs:
