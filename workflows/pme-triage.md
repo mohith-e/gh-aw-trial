@@ -2,8 +2,9 @@
 description: |
   PME triage workflow. Authenticates to Salesforce, fetches open Problem
   Management Escalations via SOQL, cross-references against GitHub Issues
-  to find untracked PMEs, ranks by priority/age/impact, and creates
-  GitHub issues for follow-up.
+  to find untracked PMEs, ranks by priority/age/impact, creates GitHub
+  issues for follow-up, and writes triage results back to Salesforce.
+  Detects enhancement clusters and works-as-designed customer pain.
 
 on:
   schedule: "every 6 hours"
@@ -75,15 +76,89 @@ safe-outputs:
     labels: [pme-triage]
     max: 10
   add-labels:
-    max: 20
+    max: 25
     allowed:
       - "pme-triage"
       - "priority:critical"
       - "priority:high"
       - "priority:medium"
       - "priority:low"
+      - "enhancement-backlog"
+      - "wad:customer-impact"
   add-comment:
     max: 5
+  jobs:
+    sf-comment:
+      description: "Post a Chatter comment on a Salesforce PME record. Use this to write triage status or GitHub issue links back to Salesforce."
+      runs-on: ubuntu-latest
+      output: "Comment posted to Salesforce PME record."
+      inputs:
+        record_id:
+          description: "The Salesforce record ID (18-char) of the PME to comment on"
+          required: true
+          type: string
+        comment:
+          description: "The comment text to post as a Chatter FeedItem"
+          required: true
+          type: string
+      steps:
+        - name: Post Chatter comment to Salesforce
+          uses: actions/github-script@v8
+          env:
+            SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
+            SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
+          with:
+            script: |
+              const fs = require('fs');
+              const outputFile = process.env.GH_AW_AGENT_OUTPUT;
+              if (!outputFile) { core.info('No agent output'); return; }
+
+              const clientId = process.env.SF_CLIENT_ID;
+              const clientSecret = process.env.SF_CLIENT_SECRET;
+              if (!clientId || !clientSecret) {
+                core.setFailed('SF_OAUTH_CLIENT_ID or SF_OAUTH_SECRET not configured');
+                return;
+              }
+
+              // Authenticate via client_credentials
+              const authResp = await fetch('https://realpage.my.salesforce.com/services/oauth2/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`
+              });
+              const authData = await authResp.json();
+              if (!authData.access_token) {
+                core.setFailed(`SF auth failed: ${JSON.stringify(authData)}`);
+                return;
+              }
+
+              // Process all sf_comment items from agent output
+              const agentOutput = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
+              const items = agentOutput.items.filter(i => i.type === 'sf_comment');
+              core.info(`Processing ${items.length} SF comment(s)`);
+
+              for (const item of items) {
+                core.info(`Posting comment to PME ${item.record_id}`);
+                try {
+                  const resp = await fetch('https://realpage.my.salesforce.com/services/data/v62.0/sobjects/FeedItem', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${authData.access_token}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ParentId: item.record_id, Body: item.comment })
+                  });
+                  if (!resp.ok) {
+                    const err = await resp.text();
+                    core.setFailed(`SF API error (${resp.status}): ${err}`);
+                    return;
+                  }
+                  core.info('Comment posted successfully');
+                } catch (error) {
+                  core.setFailed(`Request failed: ${error.message}`);
+                  return;
+                }
+              }
 
 timeout-minutes: 10
 ---
@@ -95,6 +170,8 @@ You are a PME triage agent. Your job is to fetch open Problem Management Escalat
 Execute the following pipeline in order. If any step finds zero results, stop early and report.
 
 > **Note:** The field API names for `Problem_Management_Escalation__c` below were validated against the production Salesforce org on 2026-04-12.
+
+> **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments; always check for existing GitHub-linked comments before writing.
 
 ## Step 0: Salesforce Connectivity Check
 
@@ -183,7 +260,22 @@ Build three lists:
 
 If all PMEs are already tracked and none are stale, stop and report: "All $N PMEs are already tracked. No action needed."
 
-> **TODO (future):** When a PME matches an existing GitHub issue, post the issue link back to the PME record in Salesforce. The current `pmeautomation@realpage.com` Connected App may not have write permissions — verify before implementing.
+### 2b: Write back issue links to Salesforce
+
+For each PME in the **already tracked** list that has a matching open GitHub issue, post the GitHub issue link back to the PME record in Salesforce using the `sf-comment` safe output job.
+
+Before posting, check whether the PME already has a recent Chatter comment containing the GitHub issue URL (to avoid duplicate comments on repeated runs). Call `sf-query` with:
+
+```
+SELECT Id, Body FROM FeedItem WHERE ParentId = '{PME_Id}' AND Body LIKE '%github.com%' ORDER BY CreatedDate DESC LIMIT 5
+```
+
+If a matching comment already exists for this issue, skip the write-back for that PME.
+
+If no matching comment exists, call `sf-comment` with:
+
+- `record_id`: the PME's Salesforce `Id`
+- `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
 
 ## Step 3: Group and Rank Untracked PMEs
 
@@ -196,6 +288,15 @@ Analyze the untracked PMEs and group ones that likely refer to the same underlyi
 - Explicit cross-references to each other
 
 PMEs that are clearly distinct problems should remain as singleton groups. When in doubt, do **not** group — it is better to create separate issues than to conflate unrelated problems.
+
+After grouping, classify each group as either a **bug group** or an **enhancement group**:
+
+- **Enhancement group**: ALL PMEs in the group have `Priority__c` starting with `P4` (e.g., `P4 - Enhancement`, `P4 - Feature Request`), AND the summaries/descriptions indicate a feature request, improvement suggestion, or enhancement rather than a defect. Common signals: "would be nice", "feature request", "enhancement", "ability to", "support for", "option to".
+- **Bug group**: Any group that contains at least one PME with priority P1–P3, OR where the descriptions clearly describe a defect, error, or regression — even if all PMEs are P4.
+
+When in doubt, classify as a bug group. It is better to over-surface a potential bug than to bury it in the enhancement backlog.
+
+For enhancement groups, perform an additional clustering step: look across all enhancement groups for clusters that share the same product area (`Impacted_Products__c`) or accountable team (`Accountable_Team__c`). Merge enhancement groups that target the same product area into larger "enhancement opportunity" groups. Bug groups should NOT be merged in this step — only enhancement groups.
 
 ### 3b: Score each group
 
@@ -213,32 +314,65 @@ Where:
 - `age_days`: days since the oldest `CreatedDate` in the group
 - `group_size`: number of PMEs in the group (groups with more PMEs score higher, indicating a wider-impact issue)
 
-Sort groups by score descending (highest score = most urgent).
+Sort bug groups by score descending (highest score = most urgent).
 
-Output the grouped and ranked list as a table before proceeding:
+For **enhancement groups**, use a modified scoring formula:
+
+**Enhancement Score = cluster_size × (1 + age_days / 60) × product_area_weight**
+
+Where:
+- `cluster_size`: number of PMEs in the enhancement group (dominant factor — more requests = more demand)
+- `age_days`: days since the oldest `CreatedDate` in the group
+- `product_area_weight`: 1.5 if all PMEs share the same `Impacted_Products__c` (focused demand), 1.0 otherwise
+
+Sort enhancement groups separately by enhancement score descending.
+
+Output the grouped and ranked list as a table before proceeding. List all bug groups first, then all enhancement groups, with a separator row:
 
 ```markdown
-| Rank | Group | PME Names | Priority | Oldest (days) | Size | Score | Summary |
-|------|-------|-----------|----------|---------------|------|-------|---------|
+| Rank | Type | Group | PME Names | Priority | Oldest (days) | Size | Score | Summary |
+|------|------|-------|-----------|----------|---------------|------|-------|---------|
 ```
+
+### 3c: WAD (Works As Designed) detection
+
+Before creating issues, analyze each group (both bug and enhancement) for "works as designed" signals — behavior that is technically correct per the system's design but causes customer pain.
+
+**WAD signals** (one or more indicates possible WAD):
+- The description mentions the system is "working as expected" or "by design" but the behavior causes customer frustration or confusion
+- The description references documentation or help text that confirms the current behavior
+- The escalation was filed because the customer expected different behavior, not because of an error or crash
+- Keywords: "works as designed", "by design", "expected behavior", "not a bug", "confusing", "unintuitive", "misleading"
+- The PME status or notes indicate that support confirmed the behavior is correct but the customer is still impacted
+- The `Priority__c` is P3 or P4 and the description focuses on user experience or workflow friction rather than a technical defect
+
+**WAD classification:**
+- If a group has strong WAD signals AND the behavior causes measurable customer impact (repeated escalations, customer churn risk, workflow blockers), flag it as `wad: true`.
+- If a group has WAD signals but the impact is low or cosmetic, note it but do not flag it.
+- If in doubt, do NOT flag as WAD — it is better to treat something as a bug than to dismiss customer pain.
+
+For each WAD-flagged group, record:
+- **WAD behavior**: what the system does (correctly, per its design)
+- **Customer expectation**: what the customer expected instead
+- **Impact**: why this matters (frequency, severity, workaround difficulty)
 
 ## Step 4: Create GitHub Issues
 
-For each group of untracked PMEs (up to 10 issues), create **one GitHub issue per group** using the `create-issue` safe output.
+For each group of untracked PMEs (up to 10 issues), create **one GitHub issue per group** using the `create-issue` safe output. Use the bug group template for bug groups and the enhancement group template for enhancement groups.
 
-### Single-PME groups
+### Single-PME bug groups
 
 **Title format:** `[{Priority__c}] {Name}: {Summary__c}`
 
 Use the first 80 characters of `Summary__c` if it is longer.
 
-### Multi-PME groups
+### Multi-PME bug groups
 
 **Title format:** `[{highest Priority__c}] {Name1}, {Name2}, ...: {common summary}`
 
 Where `{common summary}` is a brief description of the shared symptom or root cause (not a concatenation of all summaries). Use the first 80 characters.
 
-**Body template (for all issues):**
+**Body template (for bug group issues):**
 
 ```markdown
 ## Summary
@@ -285,6 +419,84 @@ Where `{common summary}` is a brief description of the shared symptom or root ca
 - [ ] Close this issue when the PME(s) are resolved in Salesforce
 ```
 
+### Enhancement group issues
+
+For groups classified as `enhancement`, use a different title and body template.
+
+**Title format:** `[Enhancement] {product_area}: {common theme} ({N} PMEs)`
+
+Where `{product_area}` is the shared `Impacted_Products__c` (or "Multiple Products" if mixed), and `{common theme}` is a brief description of the enhancement area (first 80 characters).
+
+**Body template for enhancement groups:**
+
+```markdown
+## Enhancement Opportunity
+
+{Description of the common enhancement theme across the grouped PMEs. What capability are customers requesting? What product area does this affect?}
+
+**Cluster size:** {N} PMEs requesting similar functionality
+**Product area:** {Impacted_Products__c}
+**Demand signal:** {N} independent escalations over {age_range} days
+
+## PMEs in this Enhancement Cluster
+
+| PME ID | Summary | Created | Age | SF Link |
+|--------|---------|---------|-----|---------|
+| {Name} | {Summary__c} | {CreatedDate} | {age_days} days | [View](https://realpage.my.salesforce.com/{Id}) |
+
+## Individual Requests
+
+{For each PME, include their specific request under a sub-heading}
+
+### {Name}: {Summary__c}
+
+{Description__c}
+
+## Existing Work Items
+
+{Same as bug template}
+
+## Product Review
+
+| Field | Value |
+|-------|-------|
+| **Accountable Team** | {Accountable_Team__c} |
+| **Impacted Products** | {union of Impacted_Products__c} |
+| **Enhancement Score** | {score} |
+| **Cluster Size** | {N} PMEs |
+| **Oldest Request** | {oldest CreatedDate} ({age} days ago) |
+
+## Next Steps
+
+- [ ] Review enhancement requests and assess product fit
+- [ ] Prioritize against current roadmap
+- [ ] If accepted, create implementation stories
+- [ ] If declined, update PME records with rationale
+- [ ] Close this issue when a decision is made
+```
+
+Apply the `enhancement-backlog` label (in addition to `pme-triage`) to enhancement group issues using the `add-labels` safe output. Do **not** apply a `priority:*` label to enhancement group issues — the priority is implicitly low (P4) and the demand signal (cluster size) is the relevant metric.
+
+### WAD-flagged issues
+
+For any group (bug or enhancement) flagged as `wad: true` in Step 3c, add a **Product Opportunity** section to the issue body. Insert it between the "Details" / "Individual Requests" section and the "Existing Work Items" section:
+
+```markdown
+## Product Opportunity — Works As Designed
+
+> **This behavior appears to be working as designed, but is causing customer pain.**
+
+| Aspect | Description |
+|--------|-------------|
+| **Current behavior** | {what the system does correctly per its design} |
+| **Customer expectation** | {what customers expect instead} |
+| **Impact** | {why this matters — frequency, workaround difficulty, customer sentiment} |
+
+This PME may not represent a bug in the traditional sense, but the gap between designed behavior and customer expectation represents a product improvement opportunity.
+```
+
+Apply the `wad:customer-impact` label to these issues using the `add-labels` safe output. This label can coexist with other labels (`pme-triage`, `priority:*`, `enhancement-backlog`).
+
 ### Apply Labels (if available)
 
 Before applying labels, check whether each label exists in this repository by searching for it. Only apply labels that already exist.
@@ -298,6 +510,15 @@ If a label does not exist in the repository, **do not attempt to add it**. Inste
 
 - Label exists: title is `PME [P2 - High] PME-500128: ...` with `priority:high` label applied
 - Label missing: title is `PME [P2 - High] PME-500128: ... [priority:high]`
+
+### Post issue link back to Salesforce
+
+For each PME included in a newly created GitHub issue, call the `sf-comment` safe output job to post a Chatter comment on the PME record:
+
+- `record_id`: the PME's Salesforce `Id`
+- `comment`: `"GitHub Issue Created: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
+
+This closes the loop between Salesforce and GitHub — anyone viewing the PME in Salesforce can immediately find the tracking issue.
 
 ## Step 5: Update Stale Tracking Issues
 
@@ -320,6 +541,11 @@ This PME was last modified on **{LastModifiedDate}**, which is after this tracki
 Please review the [PME in Salesforce](https://realpage.my.salesforce.com/{Id}) for the latest details.
 ```
 
+After posting the GitHub comment, also call the `sf-comment` safe output job to post a corresponding update on the PME record in Salesforce:
+
+- `record_id`: the PME's Salesforce `Id`
+- `comment`: `"GitHub Issue #{issue_number} updated with latest Salesforce state."`
+
 ## Final Summary
 
 After completing all steps, output a summary table:
@@ -329,13 +555,16 @@ After completing all steps, output a summary table:
 
 **Run parameters:** product_filter=`${{ inputs.product_filter }}`, lookback_days=${{ inputs.lookback_days }}, pme_limit=${{ inputs.pme_limit }}
 
-| # | PME Name(s) | Group | Priority | Age | Action | Issue |
-|---|-------------|-------|----------|-----|--------|-------|
-| 1 | {Name} | — / Group A | {Priority__c} | {age} days | Created / Already tracked / Stale — commented on #N | #N |
+| # | PME Name(s) | Type | WAD | Group | Priority | Age | Action | SF Write-Back | Issue |
+|---|-------------|------|-----|-------|----------|-----|--------|---------------|-------|
+| 1 | {Name} | Bug / Enhancement | — / WAD | — / Group A | {Priority__c} | {age} days | Created / Already tracked / Stale | ✓ / — | #N |
 ```
 
 **Totals:**
 - PMEs fetched from Salesforce: {count}
-- Already tracked: {count}
-- Untracked PMEs grouped into {N} issues: {count} PMEs → {N} issues
+- Already tracked: {count} ({count} with SF write-back)
+- Bug groups created: {count} issues ({count} PMEs)
+- Enhancement groups created: {count} issues ({count} PMEs)
+- WAD-flagged issues: {count}
 - Stale issues updated: {count}
+- SF comments posted: {count}
