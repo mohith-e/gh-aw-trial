@@ -49,6 +49,7 @@ The markdown body contains natural language instructions that Claude agents foll
 | `auto-remediation` | Hourly schedule / manual | Queries Elastic for errors, triages, creates issues, opens fix PRs |
 | `fortify-triage` | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
 | `fortify-fix` | Issue labeled `fortify-fix` | Reads a Fortify vulnerability issue, fixes the code, opens a focused PR linked to the issue |
+| `pme-triage` | Every 6 hours / manual | Fetches PMEs from Salesforce, cross-references GitHub Issues, creates issues for untracked PMEs |
 
 ## How Consumer Repos Use This
 
@@ -79,8 +80,19 @@ Uses semver tags (e.g., `v0.1.0`). Consumer repos pin to a version. Bump tags af
 - Minor: new workflows or non-breaking enhancements
 - Major: breaking changes
 
+## Working with gh-aw
+
+When creating, updating, debugging, or compiling workflows using the `gh aw` CLI, defer to the agent defined in `.github/agents/agentic-workflows.agent.md`. It routes to the appropriate specialized prompt (create, update, debug, upgrade, etc.) and references the canonical gh-aw documentation.
+
+Key commands:
+- `gh aw init` — initialize a repo for agentic workflows
+- `gh aw compile [workflow-name]` — generate/validate lock files
+- `gh aw logs [workflow-name]` — view workflow run logs
+- `gh aw audit <run-id>` — audit a specific run
+
 ## Key Conventions
 
 - Workflows assume consumer repos have a `CLAUDE.md` describing their project context and a PRD template at `docs/prds/templates/prd-template.md`.
 - The `auto-remediation` workflow requires `SERVICE_NAME` variable, `ELASTIC_MCP_URL` variable, and `ELASTIC_MCP_API_KEY` secret in the consumer repo.
+- The `pme-triage` workflow requires `SF_OAUTH_CLIENT_ID` and `SF_OAUTH_SECRET` secrets in the consumer repo (Salesforce Connected App credentials for `pmeautomation@realpage.com`).
 - `implementation.md` is intentionally NOT shared — it is project-specific and lives only in consumer repos.
