@@ -19,6 +19,9 @@ on:
       lookback_days:
         description: "How far back to search for new/updated PMEs (days)"
         default: "30"
+      priority_filter:
+        description: "SOQL LIKE pattern for Priority__c (e.g. 'P4%'). Leave empty for all priorities."
+        default: ""
       title_prefix:
         description: "Optional prefix for created issue titles"
         default: "PME "
@@ -249,6 +252,12 @@ If `${{ inputs.product_filter }}` is not empty, add this condition to the WHERE 
 
 ```
 AND Support_Product_Name__c LIKE '${{ inputs.product_filter }}'
+```
+
+If `${{ inputs.priority_filter }}` is not empty, add this condition to the WHERE clause before the ORDER BY:
+
+```
+AND Priority__c LIKE '${{ inputs.priority_filter }}'
 ```
 
 After retrieving results:
@@ -567,7 +576,7 @@ After completing all steps, output a summary table:
 ```markdown
 ## PME Triage Run Summary
 
-**Run parameters:** product_filter=`${{ inputs.product_filter }}`, lookback_days=${{ inputs.lookback_days }}, pme_limit=${{ inputs.pme_limit }}
+**Run parameters:** product_filter=`${{ inputs.product_filter }}`, priority_filter=`${{ inputs.priority_filter }}`, lookback_days=${{ inputs.lookback_days }}, pme_limit=${{ inputs.pme_limit }}
 
 | # | PME Name(s) | Type | WAD | Group | Priority | Age | Action | SF Write-Back | Issue |
 |---|-------------|------|-----|-------|----------|-----|--------|---------------|-------|
