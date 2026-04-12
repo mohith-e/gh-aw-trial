@@ -178,79 +178,106 @@ Build three lists:
 
 If all PMEs are already tracked and none are stale, stop and report: "All $N PMEs are already tracked. No action needed."
 
-## Step 3: Rank Untracked PMEs
+> **TODO (future):** When a PME matches an existing GitHub issue, post the issue link back to the PME record in Salesforce. The current `pmeautomation@realpage.com` Connected App may not have write permissions — verify before implementing.
 
-Score each untracked PME using this formula:
+## Step 3: Group and Rank Untracked PMEs
 
-**Score = priority_weight × (1 + age_days / 30)**
+### 3a: Group related PMEs
+
+Analyze the untracked PMEs and group ones that likely refer to the same underlying issue. Compare `Summary__c`, `Description__c`, `Impacted_Products__c`, and `Accountable_Team__c` across the untracked set. PMEs should be grouped together when they share:
+
+- Substantially similar summaries or descriptions (e.g., same error message, same symptom described differently)
+- The same impacted product AND similar symptoms
+- Explicit cross-references to each other
+
+PMEs that are clearly distinct problems should remain as singleton groups. When in doubt, do **not** group — it is better to create separate issues than to conflate unrelated problems.
+
+### 3b: Score each group
+
+Score each group using this formula:
+
+**Score = priority_weight × (1 + age_days / 30) × (1 + 0.25 × (group_size - 1))**
 
 Where:
-- `priority_weight` based on the `Priority__c` prefix:
+- `priority_weight` based on the highest `Priority__c` prefix in the group:
   - `P1` = 4 (e.g., `P1 - Critical`)
   - `P2` = 3 (e.g., `P2 - Critical`, `P2 - High`)
   - `P3` = 2 (e.g., `P3 - Medium`, `P3 - Major`)
   - `P4` = 1 (e.g., `P4 - Enhancement`, `P4 - Feature Request`)
   - `null` or unrecognized = 2 (default to medium)
-- `age_days`: number of days since `CreatedDate`
+- `age_days`: days since the oldest `CreatedDate` in the group
+- `group_size`: number of PMEs in the group (groups with more PMEs score higher, indicating a wider-impact issue)
 
-Sort untracked PMEs by score descending (highest score = most urgent).
+Sort groups by score descending (highest score = most urgent).
 
-Output the ranked list as a table before proceeding:
+Output the grouped and ranked list as a table before proceeding:
 
 ```markdown
-| Rank | PME Name | Priority | Age (days) | Score | Summary |
-|------|----------|----------|------------|-------|---------|
+| Rank | Group | PME Names | Priority | Oldest (days) | Size | Score | Summary |
+|------|-------|-----------|----------|---------------|------|-------|---------|
 ```
 
 ## Step 4: Create GitHub Issues
 
-For each untracked PME (up to 10), create a GitHub issue using the `create-issue` safe output.
+For each group of untracked PMEs (up to 10 issues), create **one GitHub issue per group** using the `create-issue` safe output.
+
+### Single-PME groups
 
 **Title format:** `[{Priority__c}] {Name}: {Summary__c}`
 
 Use the first 80 characters of `Summary__c` if it is longer.
 
-**Body template:**
+### Multi-PME groups
+
+**Title format:** `[{highest Priority__c}] {Name1}, {Name2}, ...: {common summary}`
+
+Where `{common summary}` is a brief description of the shared symptom or root cause (not a concatenation of all summaries). Use the first 80 characters.
+
+**Body template (for all issues):**
 
 ```markdown
 ## Summary
 
-{Summary__c — full text}
+{For single-PME groups: Summary__c — full text}
+{For multi-PME groups: description of the common issue, noting how many PMEs are grouped and why}
 
-## PME Details
+## PMEs in this Issue
 
-| Field | Value |
-|-------|-------|
-| **PME ID** | {Name} |
-| **Priority** | {Priority__c} |
-| **Status** | {Escalation_Status__c} |
-| **Accountable Team** | {Accountable_Team__c} |
-| **Responsible Team** | {Responsible_Team__c} |
-| **Impacted Products** | {Impacted_Products__c} |
-| **Created** | {CreatedDate} |
-| **Last Modified** | {LastModifiedDate} |
-| **Age** | {age_days} days |
-| **Triage Score** | {score} |
+{For each PME in the group, include a row in the table below}
 
-## Salesforce Link
+| PME ID | Priority | Status | Created | Age | SF Link |
+|--------|----------|--------|---------|-----|---------|
+| {Name} | {Priority__c} | {Escalation_Status__c} | {CreatedDate} | {age_days} days | [View](https://realpage.my.salesforce.com/{Id}) |
 
-[View in Salesforce](https://realpage.my.salesforce.com/{Id})
+## Details
+
+{For single-PME groups: the PME's Description__c, or "No description provided." if empty}
+{For multi-PME groups: include each PME's description under a sub-heading}
+
+### {Name}: {Summary__c}
+
+{Description__c}
 
 ## Existing Work Items
 
-{If Azure_DevOps_ID__c is populated: "TFS work item: [{Azure_DevOps_ID__c}]({Azure_DevOps_URL__c})"}
-{If Azure_DevOps_ID__c is empty: "No existing TFS work item linked in Salesforce."}
+{For each PME with Azure_DevOps_ID__c populated: "- {Name}: TFS [{Azure_DevOps_ID__c}]({Azure_DevOps_URL__c})"}
+{If no PMEs have work items: "No existing TFS work items linked in Salesforce."}
 
-## Description
+## Triage
 
-{Description__c — full text, or "No description provided." if empty}
+| Field | Value |
+|-------|-------|
+| **Accountable Team** | {Accountable_Team__c — from highest-priority PME, or most common across group} |
+| **Responsible Team** | {Responsible_Team__c} |
+| **Impacted Products** | {union of Impacted_Products__c across group} |
+| **Group Score** | {score} |
 
 ## Next Steps
 
 - [ ] Review PME details and confirm priority
 - [ ] Assign to the appropriate team
 - [ ] Link to implementation issue or PR once work begins
-- [ ] Close this issue when the PME is resolved in Salesforce
+- [ ] Close this issue when the PME(s) are resolved in Salesforce
 ```
 
 ### Apply Labels
@@ -258,7 +285,7 @@ Use the first 80 characters of `Summary__c` if it is longer.
 Add labels to each created issue using the `add-labels` safe output:
 
 - `pme-triage` (always)
-- `priority:{level}` based on the `Priority__c` prefix: `P1` → `priority:critical`, `P2` → `priority:high`, `P3` → `priority:medium`, `P4` → `priority:low`. If `Priority__c` is null or unrecognized, use `priority:medium`.
+- `priority:{level}` based on the highest `Priority__c` prefix in the group: `P1` → `priority:critical`, `P2` → `priority:high`, `P3` → `priority:medium`, `P4` → `priority:low`. If all `Priority__c` values are null or unrecognized, use `priority:medium`.
 
 ## Step 5: Update Stale Tracking Issues
 
@@ -290,13 +317,13 @@ After completing all steps, output a summary table:
 
 **Run parameters:** product_filter=`${{ inputs.product_filter }}`, lookback_days=${{ inputs.lookback_days }}, pme_limit=${{ inputs.pme_limit }}
 
-| # | PME Name | Priority | Age | Action | Issue |
-|---|----------|----------|-----|--------|-------|
-| 1 | {Name} | {Priority__c} | {age} days | Created / Already tracked / Stale — commented on #N | #N |
+| # | PME Name(s) | Group | Priority | Age | Action | Issue |
+|---|-------------|-------|----------|-----|--------|-------|
+| 1 | {Name} | — / Group A | {Priority__c} | {age} days | Created / Already tracked / Stale — commented on #N | #N |
 ```
 
 **Totals:**
 - PMEs fetched from Salesforce: {count}
 - Already tracked: {count}
-- New issues created: {count}
+- Untracked PMEs grouped into {N} issues: {count} PMEs → {N} issues
 - Stale issues updated: {count}
