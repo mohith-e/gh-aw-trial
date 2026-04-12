@@ -33,6 +33,11 @@ network:
   allowed:
     - defaults
     - "realpage.my.salesforce.com"
+    # tfs.realpage.com: listed to prevent AWF from redacting TFS URLs in safe
+    # outputs (e.g., Azure_DevOps_URL__c links). On GitHub-hosted runners this
+    # host is unreachable; on self-hosted runners with VPN access it will also
+    # enable future TFS REST API cross-referencing (v2).
+    - "tfs.realpage.com"
 
 tools:
   github:
