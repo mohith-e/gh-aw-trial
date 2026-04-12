@@ -481,7 +481,7 @@ Where `{product_area}` is the shared `Impacted_Products__c` (or "Multiple Produc
 - [ ] Close this issue when a decision is made
 ```
 
-Apply the `enhancement-backlog` label (in addition to `pme-triage`) to enhancement group issues using the `add-labels` safe output. Do **not** apply a `priority:*` label to enhancement group issues — the priority is implicitly low (P4) and the demand signal (cluster size) is the relevant metric.
+Apply the `enhancement-backlog` label (in addition to `pme-triage`) to enhancement group issues using the `add-labels` safe output, if the label exists in the repository. If it does not exist, prepend `[Enhancement]` to the issue title instead. Do **not** apply a `priority:*` label to enhancement group issues — the priority is implicitly low (P4) and the demand signal (cluster size) is the relevant metric.
 
 ### WAD-flagged issues
 
@@ -501,7 +501,7 @@ For any group (bug or enhancement) flagged as `wad: true` in Step 3c, add a **Pr
 This PME may not represent a bug in the traditional sense, but the gap between designed behavior and customer expectation represents a product improvement opportunity.
 ```
 
-Apply the `wad:customer-impact` label to these issues using the `add-labels` safe output. This label can coexist with other labels (`pme-triage`, `priority:*`, `enhancement-backlog`).
+Apply the `wad:customer-impact` label to these issues using the `add-labels` safe output, if the label exists in the repository. If it does not exist, prepend `[WAD]` to the issue title instead. This label can coexist with other labels (`pme-triage`, `priority:*`, `enhancement-backlog`).
 
 ### Apply Labels (if available)
 
