@@ -60,7 +60,7 @@ mcp-scripts:
         -H "Authorization: Bearer $TOKEN" \
         --data-urlencode "q=$INPUT_QUERY"
     env:
-      SF_CLIENT_ID: "${{ secrets.SF_OAUTH_CLIENT_ID }}"
+      SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
       SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
     timeout: 30
 
@@ -122,8 +122,8 @@ The PME triage workflow could not authenticate to Salesforce. This usually means
 ### Steps to Fix
 
 1. Ensure the following secrets are configured in this repository's GitHub Actions settings:
-   - `SF_OAUTH_CLIENT_ID` — the Connected App client ID for `pmeautomation@realpage.com`
-   - `SF_OAUTH_SECRET` — the corresponding client secret
+   - `SF_OAUTH_CLIENT_ID` (variable) — the Connected App client ID for `pmeautomation@realpage.com`
+   - `SF_OAUTH_SECRET` (secret) — the corresponding client secret
 
 2. Verify the Connected App in Salesforce:
    - The app must have the `client_credentials` OAuth flow enabled

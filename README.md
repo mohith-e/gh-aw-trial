@@ -80,8 +80,8 @@ gh aw add-wizard RealPage/agentics/workflows/pme-triage.md@v0.3.0
 
 The wizard will prompt for optional inputs (product filter, lookback window, etc.). You'll need to configure these secrets in your repository:
 
-- `SF_OAUTH_CLIENT_ID` — Salesforce Connected App client ID for `pmeautomation@realpage.com`
-- `SF_OAUTH_SECRET` — the corresponding client secret
+- `SF_OAUTH_CLIENT_ID` (variable) — Salesforce Connected App client ID for `pmeautomation@realpage.com`
+- `SF_OAUTH_SECRET` (secret) — the corresponding client secret
 
 > **Scheduled runs:** Required inputs have defaults, so the workflow runs without manual input. To filter by product on scheduled runs, edit your local `.github/workflows/pme-triage.md` and set the `product_filter` default (e.g., `'%Knock%'`). Your defaults are preserved on `gh aw update`.
 

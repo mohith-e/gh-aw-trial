@@ -57,7 +57,7 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 
 | Type | Name | Description |
 |------|------|-------------|
-| Secret | `SF_OAUTH_CLIENT_ID` | Salesforce Connected App client ID for `pmeautomation@realpage.com` |
+| Variable | `SF_OAUTH_CLIENT_ID` | Salesforce Connected App client ID for `pmeautomation@realpage.com` |
 | Secret | `SF_OAUTH_SECRET` | Salesforce Connected App client secret |
 
 ### Optional Inputs

@@ -94,5 +94,5 @@ Key commands:
 
 - Workflows assume consumer repos have a `CLAUDE.md` describing their project context and a PRD template at `docs/prds/templates/prd-template.md`.
 - The `auto-remediation` workflow requires `SERVICE_NAME` variable, `ELASTIC_MCP_URL` variable, and `ELASTIC_MCP_API_KEY` secret in the consumer repo.
-- The `pme-triage` workflow requires `SF_OAUTH_CLIENT_ID` and `SF_OAUTH_SECRET` secrets in the consumer repo (Salesforce Connected App credentials for `pmeautomation@realpage.com`).
+- The `pme-triage` workflow requires `SF_OAUTH_CLIENT_ID` variable and `SF_OAUTH_SECRET` secret in the consumer repo (Salesforce Connected App credentials for `pmeautomation@realpage.com`).
 - `implementation.md` is intentionally NOT shared — it is project-specific and lives only in consumer repos.
