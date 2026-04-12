@@ -280,12 +280,19 @@ Where `{common summary}` is a brief description of the shared symptom or root ca
 - [ ] Close this issue when the PME(s) are resolved in Salesforce
 ```
 
-### Apply Labels
+### Apply Labels (if available)
 
-Add labels to each created issue using the `add-labels` safe output:
+Before applying labels, check whether each label exists in this repository by searching for it. Only apply labels that already exist.
 
-- `pme-triage` (always)
+Attempt to add the following labels to each created issue using the `add-labels` safe output:
+
+- `pme-triage`
 - `priority:{level}` based on the highest `Priority__c` prefix in the group: `P1` → `priority:critical`, `P2` → `priority:high`, `P3` → `priority:medium`, `P4` → `priority:low`. If all `Priority__c` values are null or unrecognized, use `priority:medium`.
+
+If a label does not exist in the repository, **do not attempt to add it**. Instead, append the priority level to the issue title as a suffix: `[priority:high]`. For example:
+
+- Label exists: title is `PME [P2 - High] PME-500128: ...` with `priority:high` label applied
+- Label missing: title is `PME [P2 - High] PME-500128: ... [priority:high]`
 
 ## Step 5: Update Stale Tracking Issues
 

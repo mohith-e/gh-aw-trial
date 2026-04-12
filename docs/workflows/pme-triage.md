@@ -75,7 +75,17 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 - **Capped outputs** — Max 10 issues and 5 comments per run
 - **Stale update, not duplicate** — If a PME already has a tracking issue but has been updated in Salesforce, the agent comments on the existing issue rather than creating a duplicate
 - **Auth failure isolation** — If Salesforce credentials are missing or invalid, the agent creates a single setup issue and stops rather than failing silently
-- **Labeled issues** — Every issue gets `pme-triage` + `priority:{level}` labels for easy filtering
+- **Labeled issues** — Labels are applied only if they already exist in the repository. If a label is missing, the priority is appended to the issue title as a suffix instead (e.g., `[priority:high]`).
+
+## Labels
+
+The workflow uses the following labels if they exist in the consumer repository. Create them before the first run for the best experience:
+
+- `pme-triage` — applied to all issues created by this workflow
+- `priority:critical` — PMEs with `P1` priority
+- `priority:high` — PMEs with `P2` priority
+- `priority:medium` — PMEs with `P3` priority (or null/unrecognized)
+- `priority:low` — PMEs with `P4` priority
 
 ## Future: TFS Cross-Referencing
 
