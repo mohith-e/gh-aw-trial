@@ -89,21 +89,16 @@ safe-outputs:
     max: 5
   jobs:
     sf-comment:
-      description: "Post a Chatter comment on a Salesforce PME record. Use this to write triage status or GitHub issue links back to Salesforce."
-      max: 15
+      description: "Post Chatter comments on Salesforce PME records. Pass a JSON array of {record_id, comment} objects. Called once per run with all comments batched."
       runs-on: ubuntu-latest
-      output: "Comment posted to Salesforce PME record."
+      output: "Comments posted to Salesforce PME records."
       inputs:
-        record_id:
-          description: "The Salesforce record ID (18-char) of the PME to comment on"
-          required: true
-          type: string
-        comment:
-          description: "The comment text to post as a Chatter FeedItem"
+        comments_json:
+          description: 'JSON array of objects, each with "record_id" (SF 18-char ID) and "comment" (text to post). Example: [{"record_id":"a4PQU...","comment":"GitHub Tracking: #42"}]'
           required: true
           type: string
       steps:
-        - name: Post Chatter comment to Salesforce
+        - name: Post Chatter comments to Salesforce
           uses: actions/github-script@v8
           env:
             SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
@@ -133,13 +128,20 @@ safe-outputs:
                 return;
               }
 
-              // Process all sf_comment items from agent output
+              // Read the batched comments from agent output
               const agentOutput = JSON.parse(fs.readFileSync(outputFile, 'utf8'));
-              const items = agentOutput.items.filter(i => i.type === 'sf_comment');
-              core.info(`Processing ${items.length} SF comment(s)`);
+              const item = agentOutput.items.find(i => i.type === 'sf_comment');
+              if (!item || !item.comments_json) {
+                core.info('No sf_comment items found');
+                return;
+              }
 
-              for (const item of items) {
-                core.info(`Posting comment to PME ${item.record_id}`);
+              const comments = JSON.parse(item.comments_json);
+              core.info(`Processing ${comments.length} SF comment(s)`);
+
+              let posted = 0;
+              for (const entry of comments) {
+                core.info(`Posting comment to PME ${entry.record_id}`);
                 try {
                   const resp = await fetch('https://realpage.my.salesforce.com/services/data/v62.0/sobjects/FeedItem', {
                     method: 'POST',
@@ -147,18 +149,23 @@ safe-outputs:
                       'Authorization': `Bearer ${authData.access_token}`,
                       'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ ParentId: item.record_id, Body: item.comment })
+                    body: JSON.stringify({ ParentId: entry.record_id, Body: entry.comment })
                   });
                   if (!resp.ok) {
                     const err = await resp.text();
-                    core.setFailed(`SF API error (${resp.status}): ${err}`);
-                    return;
+                    core.warning(`SF API error for ${entry.record_id} (${resp.status}): ${err}`);
+                    continue;
                   }
+                  posted++;
                   core.info('Comment posted successfully');
                 } catch (error) {
-                  core.setFailed(`Request failed: ${error.message}`);
-                  return;
+                  core.warning(`Request failed for ${entry.record_id}: ${error.message}`);
+                  continue;
                 }
+              }
+              core.info(`Posted ${posted}/${comments.length} comments`);
+              if (posted === 0) {
+                core.setFailed('All SF comment posts failed');
               }
 
 timeout-minutes: 10
@@ -173,6 +180,8 @@ Execute the following pipeline in order. If any step finds zero results, stop ea
 > **Note:** The field API names for `Problem_Management_Escalation__c` below were validated against the production Salesforce org on 2026-04-12.
 
 > **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments; always check for existing GitHub-linked comments before writing.
+>
+> **Batching:** Custom safe output jobs can only be called once per run. Collect ALL SF comments throughout the pipeline and call `sf-comment` exactly once at the end of Step 5 with a single `comments_json` array containing every comment to post.
 
 ## Step 0: Salesforce Connectivity Check
 
@@ -267,7 +276,7 @@ For each PME in the **already tracked** list that has a matching open GitHub iss
 
 To avoid duplicate comments on repeated runs, check whether the GitHub issue body already contains a note that the SF write-back was completed. Look for the string `SF write-back: done` in the issue body. If present, skip the write-back for that PME.
 
-If the issue body does not contain this marker, call `sf-comment` with:
+If the issue body does not contain this marker, add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
@@ -510,7 +519,7 @@ If a label does not exist in the repository, **do not attempt to add it**. Inste
 
 ### Post issue link back to Salesforce
 
-For each PME included in a newly created GitHub issue, call the `sf-comment` safe output job to post a Chatter comment on the PME record:
+For each PME included in a newly created GitHub issue, add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Issue Created: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
@@ -538,10 +547,18 @@ This PME was last modified on **{LastModifiedDate}**, which is after this tracki
 Please review the [PME in Salesforce](https://realpage.my.salesforce.com/{Id}) for the latest details.
 ```
 
-After posting the GitHub comment, also call the `sf-comment` safe output job to post a corresponding update on the PME record in Salesforce:
+After posting the GitHub comment, also add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Issue #{issue_number} updated with latest Salesforce state."`
+
+### Post all SF comments
+
+After completing Steps 2b, 4, and 5, call the `sf-comment` safe output job exactly **once** with all collected comments:
+
+- `comments_json`: a JSON array of `{"record_id": "...", "comment": "..."}` objects
+
+If no comments were collected (e.g., all PMEs already had write-back markers), skip this call.
 
 ## Final Summary
 
