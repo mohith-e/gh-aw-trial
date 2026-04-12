@@ -40,6 +40,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `fortify-triage` | Pulls Fortify SAST findings, opens one issue per critical/high vuln | After Fortify scan completes, weekly, or manual |
 | `fortify-fix` | Reads a Fortify issue and opens a focused fix PR | Issue labeled `fortify-fix` |
 | `implement-issue` | Reads an issue, writes code + tests, opens a PR with self-review | Issue labeled `agent:implement` |
+| `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 
@@ -66,6 +67,24 @@ gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.2.0
 The wizard will prompt for your service name, Kibana base URL, data view ID, and other inputs. Once complete, it creates a PR that can be reviewed and merged.
 
 > **Important:** GitHub Actions does not populate `inputs.*` on scheduled runs — `workflow_dispatch` input defaults are UI-only and have no runtime effect. This workflow uses a workflow-level `env:` block instead, which applies to both schedule and manual dispatch. After import, open `.github/workflows/auto-remediation.md` and fill in `SERVICE_NAME`, `KIBANA_BASE_URL`, `KIBANA_DATA_VIEW_ID`, and `TITLE_PREFIX` in the `env:` section at the top. Then run `gh aw compile`. Since `gh aw update` does a 3-way merge, your values will be preserved on future updates.
+
+### Adding pme-triage
+
+The PME triage workflow requires Salesforce OAuth credentials. Use the `add-wizard` command:
+
+```bash
+git status
+git checkout main
+
+gh aw add-wizard RealPage/agentics/workflows/pme-triage.md@v0.3.0
+```
+
+The wizard will prompt for optional inputs (product filter, lookback window, etc.). You'll need to configure these secrets in your repository:
+
+- `SF_OAUTH_CLIENT_ID` (variable) — Salesforce Connected App client ID for `pmeautomation@realpage.com`
+- `SF_OAUTH_SECRET` (secret) — the corresponding client secret
+
+> **Scheduled runs:** Required inputs have defaults, so the workflow runs without manual input. To filter by product on scheduled runs, edit your local `.github/workflows/pme-triage.md` and set the `product_filter` default (e.g., `'%Knock%'`). Your defaults are preserved on `gh aw update`.
 
 > See [docs/workflows.md](docs/workflows.md) for detailed documentation, pipeline diagrams, and how workflows chain together.
 
@@ -104,6 +123,24 @@ Want to improve these workflows for everyone?
 4. Open a PR — once merged and tagged, all consumers can bump their version ref
 
 All commits must follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard. A CI check enforces this on every PR.
+
+### Development Tooling
+
+This repo is set up for authoring workflows with GitHub Copilot Agent and VS Code:
+
+- **Copilot Agent dispatcher** — `.github/agents/agentic-workflows.agent.md` routes requests to the right gh-aw prompt (create, update, debug, upgrade). Open the repo in VS Code or GitHub Copilot and ask it to "create a new workflow" or "debug workflow X".
+- **VS Code MCP server** — `.vscode/mcp.json` connects the `gh aw mcp-server` so Copilot can call gh-aw tools directly.
+- **Copilot setup steps** — `.github/workflows/copilot-setup-steps.yml` installs the gh-aw CLI in Copilot Agent's environment.
+
+To set up a new repo for workflow authoring in the same way, run:
+
+```bash
+gh aw init
+```
+
+### Automated Documentation
+
+A `daily-doc-updater` workflow runs on this repo every day. It scans merged pull requests from the last 24 hours, identifies undocumented features, and opens documentation PRs automatically. You don't need to manually update `README.md` or `docs/workflows.md` for every change — the agent handles routine doc updates.
 
 ### Versioning and Releases
 

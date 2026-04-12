@@ -2,6 +2,30 @@
 
 Quick reference for common `gh aw` commands when working with agentic workflows.
 
+## Repository Setup
+
+```bash
+# Initialize a repository for agentic workflow authoring
+# Adds the GH-AW dispatcher agent, VS Code/MCP dev tooling, and Copilot setup steps
+gh aw init
+
+# Add a workflow from a shared library (interactive wizard — walks through setup and creates a PR)
+gh aw add-wizard RealPage/agentics/workflows/<workflow-name>.md@<version>
+
+# Compile a workflow stub into a GitHub Actions lock file
+gh aw compile [workflow-name]
+
+# Validate a compiled workflow without running it
+gh aw compile --validate
+
+# Update a workflow to a newer version (3-way merge preserves your local changes)
+gh aw update <workflow-name>
+gh aw update <workflow-name> --ref v0.3.0
+
+# Discard local changes and take the upstream version exactly
+gh aw update <workflow-name> --no-merge
+```
+
 ## Managing Workflows
 
 ```bash

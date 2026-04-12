@@ -10,6 +10,7 @@ These are end-to-end workflows that chain multiple agents together:
 - [Story-Driven Delivery](workflows/story-driven-delivery.md) — idea → opportunity → user activities → stories → implementation → validation
 - [Auto-Remediation](workflows/auto-remediation.md) — errors logged → errors triaged → issue created → PR with fix
 - [Fortify Remediation](workflows/fortify-remediation.md) — SAST scan completes → vulnerabilities triaged → issue per finding → PR with fix
+- [PME Triage](workflows/pme-triage.md) — Salesforce PMEs fetched → cross-referenced against GitHub Issues → untracked PMEs surfaced as issues
 
 ## Individual Workflows
 
@@ -25,6 +26,7 @@ These are end-to-end workflows that chain multiple agents together:
 | [fortify-triage](../workflows/fortify-triage.md) | Fortify SAST scan completes / weekly / manual | Pulls Fortify on Demand findings, creates one issue per critical/high vulnerability with remediation guidance |
 | [fortify-fix](../workflows/fortify-fix.md) | Issue labeled `fortify-fix` | Reads the vulnerability issue, fixes the code, opens a focused PR linked to the issue |
 | [implement-issue](../workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, discovers the project stack, writes code and tests, runs validation, and opens a PR with a self-review. Generic crawl-tier implementation agent |
+| [pme-triage](../workflows/pme-triage.md) | Every 6 hours / manual | Fetches PMEs from Salesforce, cross-references GitHub Issues, creates issues for untracked PMEs |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 
