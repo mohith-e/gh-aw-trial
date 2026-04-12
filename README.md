@@ -39,6 +39,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `auto-remediation` | Finds errors in logs, opens fix PRs | Every 2 hours (looks back 2 hrs) or manual |
 | `fortify-triage` | Pulls Fortify SAST findings, opens one issue per critical/high vuln | After Fortify scan completes, weekly, or manual |
 | `fortify-fix` | Reads a Fortify issue and opens a focused fix PR | Issue labeled `fortify-fix` |
+| `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 
@@ -65,6 +66,24 @@ gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.2.0
 The wizard will prompt for your service name, Kibana base URL, data view ID, and other inputs. Once complete, it creates a PR that can be reviewed and merged.
 
 > **Important:** GitHub Actions does not populate `inputs.*` on scheduled runs — `workflow_dispatch` input defaults are UI-only and have no runtime effect. This workflow uses a workflow-level `env:` block instead, which applies to both schedule and manual dispatch. After import, open `.github/workflows/auto-remediation.md` and fill in `SERVICE_NAME`, `KIBANA_BASE_URL`, `KIBANA_DATA_VIEW_ID`, and `TITLE_PREFIX` in the `env:` section at the top. Then run `gh aw compile`. Since `gh aw update` does a 3-way merge, your values will be preserved on future updates.
+
+### Adding pme-triage
+
+The PME triage workflow requires Salesforce OAuth credentials. Use the `add-wizard` command:
+
+```bash
+git status
+git checkout main
+
+gh aw add-wizard RealPage/agentics/workflows/pme-triage.md@v0.3.0
+```
+
+The wizard will prompt for optional inputs (product filter, lookback window, etc.). You'll need to configure these secrets in your repository:
+
+- `SF_OAUTH_CLIENT_ID` (variable) — Salesforce Connected App client ID for `pmeautomation@realpage.com`
+- `SF_OAUTH_SECRET` (secret) — the corresponding client secret
+
+> **Scheduled runs:** Required inputs have defaults, so the workflow runs without manual input. To filter by product on scheduled runs, edit your local `.github/workflows/pme-triage.md` and set the `product_filter` default (e.g., `'%Knock%'`). Your defaults are preserved on `gh aw update`.
 
 > See [docs/workflows.md](docs/workflows.md) for detailed documentation, pipeline diagrams, and how workflows chain together.
 
