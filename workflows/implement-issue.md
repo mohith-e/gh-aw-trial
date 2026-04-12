@@ -20,9 +20,13 @@ safe-outputs:
   create-pull-request:
     max: 1
   add-comment:
-    max: 3
+    max: 4
   add-labels:
     max: 3
+  remove-labels:
+    max: 3
+  submit-pull-request-review:
+    max: 1
   noop:
 
 ---
@@ -57,6 +61,18 @@ Read the triggering issue (title, body, comments, linked issues, any task-list i
 
 If the issue is unclear or missing acceptance criteria, add a comment listing the specific questions you have, apply label `agent:needs-clarification`, and call `noop`. Do not guess at ambiguous requirements.
 
+**Scope check.** Before continuing, estimate how much work the issue actually requires. If any of these are true, the issue is too large for a single implementation pass:
+
+- It would touch more than ~5 files.
+- It clearly spans multiple subsystems (e.g., "refactor the auth layer", "add multi-tenancy support", "migrate to a new framework").
+- The acceptance criteria describe a sequence of independently shippable changes rather than one cohesive change.
+
+When the issue is too large, do not start implementing. Instead:
+1. Post a comment explaining which files/subsystems it would touch and suggesting a decomposition into smaller sub-issues.
+2. Apply label `ready-for-decomposition` (the `story-decomposition` workflow picks this up).
+3. Remove label `agent:implement` so re-labeling is a deliberate act after decomposition.
+4. Call `noop` and exit.
+
 ### Step 2: Discover the Project Context
 
 This workflow does not know your repo's stack ahead of time. Discover it:
@@ -72,6 +88,8 @@ This workflow does not know your repo's stack ahead of time. Discover it:
 3. **Identify the real test command** — prefer what `CLAUDE.md` says, then what's in the package manifest scripts, then the stack default. If you can't find one, note it in the PR and skip the test run (don't fabricate commands).
 4. **Identify the lint/format command** the same way.
 5. **Read the existing file structure** to understand where new code should go. Follow the repo's conventions — don't invent a new directory layout.
+
+> **Monorepos:** This workflow assumes a single-project repo. For monorepos, scope the issue to a subdirectory and the agent will run stack detection from there.
 
 ### Step 3: Create an Implementation Plan
 
@@ -102,11 +120,16 @@ This gives humans a chance to redirect you before you write code. Proceed to the
 
 ### Step 4: Create a Branch and Implement
 
-Create a branch named after the issue:
+Create a branch named after the issue. If a branch from a previous attempt still exists (e.g., the first run failed before opening a PR and the label was re-applied), delete it first — the re-label is an explicit signal that the previous attempt should be discarded:
 
 ```bash
+git fetch origin
+git branch -D agent/implement-issue-<issue_number> 2>/dev/null || true
+git push origin --delete agent/implement-issue-<issue_number> 2>/dev/null || true
 git checkout -b agent/implement-issue-<issue_number>
 ```
+
+If you discarded a previous branch, mention it in the PR body under **Assumptions** so reviewers know this is a retry.
 
 Write the code using the `edit` tool. Guidelines:
 
@@ -134,10 +157,16 @@ If there is no test command (new project with no suite), note that in the PR des
 
 ### Step 6: Open a Pull Request
 
-Commit and push:
+Before staging, run `git status --porcelain` and review every entry. For each file, decide whether it belongs in this PR:
+
+- **Source and test files you intentionally created or modified** → stage them.
+- **Build artifacts, cache directories, editor files, logs, `node_modules/`, `__pycache__/`, `.venv/`, `dist/`, `build/`, coverage reports, etc.** → do **not** stage. If any of these show up in the status, they indicate a missing `.gitignore` entry. Add the pattern to `.gitignore` and stage only the gitignore update alongside your real changes.
+- **Unexpected files you did not touch** → stop and investigate. Do not stage files you cannot account for.
+
+Then commit and push, staging each intended file by name:
 
 ```bash
-git add -A
+git add path/to/file.ext path/to/other-file.ext
 git commit -m "<type>: <short description>
 
 Implements #<issue_number>.
@@ -158,7 +187,7 @@ Create the PR with:
 
 <What this PR does in 1-3 sentences. User-facing outcome, not implementation detail.>
 
-Implements #<issue_number>.
+Closes #<issue_number>.
 
 ## What Changed
 
@@ -191,7 +220,7 @@ Commands run:
 
 ### Step 7: Self-Review
 
-After opening the PR, re-read your own diff with fresh eyes and post a review comment on the PR with:
+After opening the PR, re-read your own diff with fresh eyes and submit a pull request review (via `submit-pull-request-review` with `event: COMMENT`) whose body is:
 
 ```markdown
 ## Self-Review
@@ -209,6 +238,8 @@ After opening the PR, re-read your own diff with fresh eyes and post a review co
 **Edge cases I did NOT handle:**
 - <case>: <why — e.g., "out of scope per issue">
 ```
+
+Use `submit-pull-request-review`, not `add-comment` — the self-review should be a first-class PR review so it shows up in the Reviews tab and notifies subscribers the normal way.
 
 Be honest. The purpose of the self-review is to surface the things a human reviewer can't easily see — it is not a victory lap.
 

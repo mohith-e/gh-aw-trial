@@ -4,6 +4,23 @@ Generic implementation agent. Label an issue `agent:implement` and it reads the 
 
 Works out of the box in any repo because it discovers the project's stack and test commands at runtime.
 
+## Requirements
+
+| Requirement | Why |
+|---|---|
+| Secret: `ANTHROPIC_API_KEY` | The workflow uses `engine: claude`, which calls the Anthropic API. |
+| Labels: `agent:implement`, `agent:needs-review`, `agent:needs-clarification`, `ready-for-decomposition` | The workflow triggers on `agent:implement`, applies the `agent:*` labels for PR handoff and ambiguous issues, and applies `ready-for-decomposition` (shared with the `story-decomposition` workflow) when an issue is too large to implement in one pass. |
+| GitHub Actions: "Allow GitHub Actions to create and approve pull requests" | Required by the `create-pull-request` safe output. Settings → Actions → General → Workflow permissions. |
+| Recommended: `CLAUDE.md` in the repo root | The agent trusts `CLAUDE.md` over inference when discovering stack, conventions, and commands. |
+
+```bash
+gh secret set ANTHROPIC_API_KEY
+gh label create agent:implement --description "Triggers implement-issue workflow" --color "1d76db"
+gh label create agent:needs-review --description "Implementation PR awaiting review" --color "fbca04"
+gh label create agent:needs-clarification --description "Issue needs more detail before implementation" --color "d93f0b"
+gh label create ready-for-decomposition --description "Issue is too large; break it into sub-issues" --color "5319e7"
+```
+
 ## Getting Started
 
 **From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
@@ -25,6 +42,8 @@ Then label any issue `agent:implement` and watch it work.
 The shipped workflow is generic — it auto-discovers your stack each run. That's great for trying it out, but once you trust the agent and want faster, more predictable runs, you can tailor it to your specific codebase.
 
 **Don't hand-edit `.github/workflows/implement-issue.md`.** Use Claude Code and let the gh-aw dispatcher agent drive the edit so the workflow stays schema-valid and the lock file stays in sync.
+
+> **Swapping engines:** The workflow body instructs the agent to read `CLAUDE.md` as the authoritative source for stack and conventions. That works with `engine: claude`. If you change the engine, review the `CLAUDE.md` references in the workflow body — other engines may look for a different instructions file or ignore it entirely.
 
 ### Prerequisite: `gh aw init`
 
