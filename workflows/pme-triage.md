@@ -110,7 +110,7 @@ Inspect the response:
 
 **Body:**
 
-```markdown
+````markdown
 ## Action Required — Configure Salesforce OAuth Credentials
 
 The PME triage workflow could not authenticate to Salesforce. This usually means the OAuth client credentials are missing or misconfigured.
@@ -141,7 +141,7 @@ The PME triage workflow could not authenticate to Salesforce. This usually means
 ### After Fixing
 
 Close this issue and re-run the PME triage workflow. It will detect successful authentication and proceed normally.
-```
+````
 
 Add the labels `pme-triage` to this issue using the `add-labels` safe output.
 
@@ -300,4 +300,3 @@ After completing all steps, output a summary table:
 - Already tracked: {count}
 - New issues created: {count}
 - Stale issues updated: {count}
-```
