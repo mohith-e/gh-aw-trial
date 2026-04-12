@@ -264,18 +264,14 @@ If all PMEs are already tracked and none are stale, stop and report: "All $N PME
 
 For each PME in the **already tracked** list that has a matching open GitHub issue, post the GitHub issue link back to the PME record in Salesforce using the `sf-comment` safe output job.
 
-Before posting, check whether the PME already has a recent Chatter comment containing the GitHub issue URL (to avoid duplicate comments on repeated runs). Call `sf-query` with:
+To avoid duplicate comments on repeated runs, check whether the GitHub issue body already contains a note that the SF write-back was completed. Look for the string `SF write-back: done` in the issue body. If present, skip the write-back for that PME.
 
-```
-SELECT Id, Body FROM FeedItem WHERE ParentId = '{PME_Id}' AND Body LIKE '%github.com%' ORDER BY CreatedDate DESC LIMIT 5
-```
-
-If a matching comment already exists for this issue, skip the write-back for that PME.
-
-If no matching comment exists, call `sf-comment` with:
+If the issue body does not contain this marker, call `sf-comment` with:
 
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
+
+> **Note:** FeedItem cannot be queried by ParentId via SOQL (Salesforce platform restriction). Use the GitHub issue body as the dedup source of truth, not Salesforce. If the dedup check is inconclusive, proceed with the write-back — a duplicate comment is preferable to no write-back at all.
 
 ## Step 3: Group and Rank Untracked PMEs
 
