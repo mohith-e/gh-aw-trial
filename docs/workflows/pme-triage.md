@@ -1,6 +1,6 @@
 # PME Triage
 
-Fetches Problem Management Escalations from Salesforce, cross-references them against GitHub Issues, and surfaces untracked PMEs as new issues.
+Fetches Problem Management Escalations from Salesforce, cross-references them against GitHub Issues, surfaces untracked PMEs as new issues, and writes triage results back to Salesforce. Detects enhancement clusters and works-as-designed customer pain.
 
 ## Pipeline
 
@@ -8,15 +8,24 @@ Fetches Problem Management Escalations from Salesforce, cross-references them ag
 flowchart LR
     SF["Salesforce PMEs"] -->|"scheduled<br/>every 6 hours"| PT["PME Triage Agent"]
     PT -->|"cross-references<br/>GitHub Issues"| D{"Untracked?"}
-    D -->|"yes"| I["GitHub Issue<br/>with PME details +<br/>SF deep link"]
+    D -->|"yes"| CL{"Bug or<br/>Enhancement?"}
+    CL -->|"bug"| I["Bug Issue<br/>+ WAD check"]
+    CL -->|"enhancement"| E["Enhancement<br/>Opportunity Issue"]
     D -->|"no"| S["Skip / Update<br/>stale issues"]
-    I --> H["Human Follow-up"]
+    I --> WB["SF Write-Back"]
+    E --> WB
+    S --> WB
+    WB -->|"Chatter comment<br/>on PME record"| SF
+    WB --> H["Human Follow-up"]
 
     style SF fill:#0176d3,color:#fff
     style PT fill:#6c5ce7,color:#fff
     style D fill:#fdcb6e,color:#333
+    style CL fill:#fdcb6e,color:#333
     style I fill:#00b894,color:#fff
+    style E fill:#a29bfe,color:#fff
     style S fill:#b2bec3,color:#333
+    style WB fill:#0176d3,color:#fff
     style H fill:#16a34a,color:#fff
 ```
 
@@ -28,15 +37,17 @@ The PME triage agent runs on a schedule (every 6 hours) or manually via `workflo
 
 2. **Fetch Open PMEs** — Queries Salesforce via SOQL for open PMEs within the lookback window, optionally filtered by product. Returns PME details including priority, status, teams, and linked work items.
 
-3. **Cross-Reference** — Searches this repository's GitHub Issues for existing tracking issues (identified by the `pme-triage` label and PME name). Builds lists of already-tracked, untracked, and stale PMEs.
+3. **Cross-Reference & SF Write-Back** — Searches this repository's GitHub Issues for existing tracking issues (identified by the `pme-triage` label and PME name). Builds lists of already-tracked, untracked, and stale PMEs. For already-tracked PMEs, posts the GitHub issue link back to the Salesforce PME record as a Chatter comment (deduped via issue body marker).
 
-4. **Rank** — Scores untracked PMEs by priority weight × age factor. Critical + old PMEs surface first.
+4. **Classify & Rank** — Groups related untracked PMEs, classifies each group as a **bug** or **enhancement** (P4 feature requests), scores by priority/age/cluster size, and detects **works-as-designed** behavior causing customer pain.
 
-5. **Create Issues** — Creates GitHub issues for untracked PMEs (up to 10 per run) with structured details, Salesforce deep links, and priority labels.
+5. **Create Issues** — Creates GitHub issues for untracked PMEs (up to 10 per run). Bug groups get structured details with priority labels. Enhancement groups get a "Product Opportunity" template with demand signals and `enhancement-backlog` label. WAD-flagged groups get an additional "Product Opportunity — Works As Designed" section and `wad:customer-impact` label.
 
-6. **Update Stale Issues** — Comments on existing tracking issues where the Salesforce PME has been modified since the issue was created.
+6. **SF Write-Back** — Posts GitHub issue links back to each PME record in Salesforce via a batched custom safe output job (`sf-comment`). Comments are permanent (FeedItem deletion is disabled org-wide).
 
-7. **Human Follow-up** — Teams review the created issues, assign ownership, and link to implementation work.
+7. **Update Stale Issues** — Comments on existing tracking issues where the Salesforce PME has been modified since the issue was created, with a corresponding SF write-back.
+
+8. **Human Follow-up** — Teams review the created issues, assign ownership, and link to implementation work. Product teams review `enhancement-backlog` and `wad:customer-impact` issues separately.
 
 ## Workflows Used
 
@@ -73,8 +84,11 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 
 - **Duplicate detection** — Checks for existing open issues with the `pme-triage` label before creating new ones
 - **Capped outputs** — Max 10 issues and 5 comments per run
+- **SF write-back gating** — Salesforce writes go through a custom safe output job (`sf-comment`), not MCP scripts. Comments are batched into a single call and the job only runs if the agent emits items. FeedItem deletion is disabled org-wide — all comments are permanent.
+- **SF write-back dedup** — The agent checks the GitHub issue body for an `SF write-back: done` marker before posting to avoid duplicate Chatter comments on repeated runs
 - **Stale update, not duplicate** — If a PME already has a tracking issue but has been updated in Salesforce, the agent comments on the existing issue rather than creating a duplicate
 - **Auth failure isolation** — If Salesforce credentials are missing or invalid, the agent creates a single setup issue and stops rather than failing silently
+- **Conservative classification** — When in doubt, PMEs are classified as bugs (not enhancements) and not flagged as WAD. Over-surfacing is preferred to under-surfacing.
 - **Labeled issues** — Labels are applied only if they already exist in the repository. If a label is missing, the priority is appended to the issue title as a suffix instead (e.g., `[priority:high]`).
 
 ## Labels
@@ -86,7 +100,9 @@ The workflow uses the following labels if they exist in the consumer repository.
 - `priority:high` — PMEs with `P2` priority
 - `priority:medium` — PMEs with `P3` priority (or null/unrecognized)
 - `priority:low` — PMEs with `P4` priority
+- `enhancement-backlog` — P4 enhancement/feature-request PME clusters for product review
+- `wad:customer-impact` — PMEs describing works-as-designed behavior causing customer pain
 
 ## Future: TFS Cross-Referencing
 
-The workflow currently cross-references against GitHub Issues only. A future version (v2) will add support for checking TFS work items via `Azure_DevOps_ID__c` fields on the PME object, using the TFS REST API. This requires self-hosted runners with network access to `tfs.realpage.com`.
+The workflow currently cross-references against GitHub Issues only. A future version will add support for checking TFS work items via `Azure_DevOps_ID__c` fields on the PME object, using the TFS REST API. This requires self-hosted runners with network access to `tfs.realpage.com`.
