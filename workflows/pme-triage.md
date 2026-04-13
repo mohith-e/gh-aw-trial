@@ -187,7 +187,7 @@ on:
         echo "  Existing issues: $GH_ISSUE_COUNT"
         echo "  State entries: $STATE_KEYS"
     - name: Upload context artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pme-context
         path: /tmp/gh-aw/agent/pme-context.json
@@ -226,7 +226,7 @@ tools:
 
 steps:
   - name: Download context artifact
-    uses: actions/download-artifact@v4
+    uses: actions/download-artifact@v8
     with:
       name: pme-context
       path: /tmp/gh-aw/agent/
