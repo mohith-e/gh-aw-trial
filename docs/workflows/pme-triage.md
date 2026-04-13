@@ -144,14 +144,37 @@ The agent step has a 10-minute timeout. Runs that create many issues can exceed 
    ```
 3. Look for long gaps between a `CALL` and its `RESULT` — that's either a slow MCP tool or slow LLM output generation. A cluster of `create_issue` calls followed by `search_issues` or `list_issues` calls indicates the agent is searching for its own newly created issues (a known anti-pattern addressed by the "safe output timing" prompt note).
 
+## Future: Repo Memory for Cross-Reference State
+
+The workflow currently cross-references PMEs against GitHub Issues on every run by searching for each PME name. gh-aw's [repo memory](https://github.github.com/gh-aw/reference/repo-memory/) can replace this with a persistent state file on a managed Git branch.
+
+**How it would work:** Enable `tools.repo-memory` in the workflow frontmatter. The agent maintains a `pme-state.json` file that maps each PME to its tracking status:
+
+```json
+{
+  "PME-493502": {"status": "tracked", "issue": 135, "sf_writeback": true},
+  "PME-497398": {"status": "issue_pending", "title": "[P4 - Enhancement] PME-497398: ..."},
+  "PME-500128": {"status": "stale", "issue": 102, "last_modified": "2026-04-10"}
+}
+```
+
+On each run, the agent reads the state file, diffs against the fresh Salesforce fetch, and only searches GitHub for PMEs not already in the file. This turns the cross-reference step from O(n) GitHub searches into a single file read for known PMEs.
+
+It also solves the issue-number backfill problem. On run N, the agent creates issues via safe outputs and records `"status": "issue_pending"` in the state file. On run N+1, the agent finds the created issue, updates the state to `"status": "tracked"` with the real issue number, and posts the SF write-back with a direct link. No searching for issues that don't exist yet.
+
+**Benefits even as a single workflow:**
+- Faster cross-referencing (file read vs. GitHub API calls)
+- Richer SF write-back (real issue links on the next run)
+- Audit trail of PME tracking state across runs (Git history on the memory branch)
+
 ## Future: Orchestrator/Worker Split
 
-If the single-workflow approach hits scaling limits (e.g., needing to process more PMEs per cycle than one agent can handle within the timeout), the pipeline can be split into two stages using the gh-aw `dispatch-workflow` orchestration pattern:
+If the single-workflow approach hits scaling limits, the pipeline can be split into two stages using the gh-aw `dispatch-workflow` orchestration pattern. Repo memory serves as the data-passing mechanism between stages — the orchestrator writes untracked PME data, the worker reads it.
 
-1. **Orchestrator** — Fetches PMEs from Salesforce, cross-references against GitHub Issues, writes the untracked PME list to a JSON file on a short-lived branch, then dispatches the worker with the branch ref as input.
-2. **Worker** — Checks out the branch, reads the context file, groups/scores PMEs, creates issues, and posts SF write-back. The branch is cleaned up after the worker completes.
+1. **Orchestrator** — Fetches PMEs, cross-references against the state file, writes the untracked PME list to repo memory, dispatches the worker.
+2. **Worker** — Reads the untracked PME list from repo memory, groups/scores, creates issues, updates the state file with pending issue records.
 
-Each stage gets its own 10-minute timeout. The branch serves as the data-passing mechanism — no payload size limits, no encoding issues, and the branch itself is an audit trail of what the orchestrator passed to the worker.
+Each stage gets its own 10-minute timeout. Repo memory handles branch management, commits, and conflict resolution automatically — no manual cleanup needed.
 
 ## Future: TFS Cross-Referencing
 
