@@ -81,9 +81,15 @@ on:
         fi
         QUERY="${QUERY} ORDER BY Priority__c ASC, CreatedDate ASC LIMIT ${PME_LIMIT}"
         echo "Query: $QUERY"
+        SF_ERR=$(mktemp)
         SF_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
           -H "Authorization: Bearer $TOKEN" \
-          --data-urlencode "q=$QUERY")
+          --data-urlencode "q=$QUERY" 2>"$SF_ERR") || true
+        if [ -z "$SF_RESULT" ] || ! echo "$SF_RESULT" | jq . > /dev/null 2>&1; then
+          echo "::warning::SOQL query failed: $(cat "$SF_ERR")"
+          SF_RESULT='{"totalSize":0,"records":[]}'
+        fi
+        rm -f "$SF_ERR"
         PME_COUNT=$(echo "$SF_RESULT" | jq '.totalSize // 0')
         echo "Fetched $PME_COUNT PME(s) from Salesforce."
         echo "::endgroup::"
@@ -92,8 +98,14 @@ on:
         # 3. GitHub issues with pme-triage label
         #──────────────────────────────────────────────
         echo "::group::GitHub issues"
+        GH_ERR=$(mktemp)
         GH_ISSUES=$(gh issue list --repo "$REPO" --label pme-triage --state open --limit 200 \
-          --json number,title,body,createdAt,labels 2>/dev/null || echo '[]')
+          --json number,title,body,createdAt,labels 2>"$GH_ERR") || true
+        if [ -z "$GH_ISSUES" ] || ! echo "$GH_ISSUES" | jq . > /dev/null 2>&1; then
+          echo "::warning::gh issue list failed: $(cat "$GH_ERR")"
+          GH_ISSUES='[]'
+        fi
+        rm -f "$GH_ERR"
         GH_ISSUE_COUNT=$(echo "$GH_ISSUES" | jq 'length')
         echo "Found $GH_ISSUE_COUNT existing pme-triage issue(s)."
         echo "::endgroup::"
@@ -122,12 +134,22 @@ on:
         # No git checkout in pre_activation, so use the GitHub API to check
         # for the memory branch and fetch the state file via raw content.
         MEMORY_BRANCH_REF=$(gh api "repos/$REPO/git/ref/heads/memory/pme-triage" --jq '.ref' 2>/dev/null || echo '')
-        if [ -n "$MEMORY_BRANCH_REF" ]; then
-          # File is at the root of the memory branch (not under a subdirectory)
-          STATE_CONTENT=$(gh api "repos/$REPO/contents/pme-state.json?ref=memory/pme-triage" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}')
-          if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
-            STATE="$STATE_CONTENT"
+        if [ -z "$MEMORY_BRANCH_REF" ]; then
+          echo "::notice::No memory/pme-triage branch found (first run or branch deleted). Starting with empty state."
+        else
+          STATE_ERR=$(mktemp)
+          STATE_RAW=$(gh api "repos/$REPO/contents/pme-state.json?ref=memory/pme-triage" --jq '.content' 2>"$STATE_ERR") || true
+          if [ -z "$STATE_RAW" ]; then
+            echo "::warning::Could not fetch state file: $(cat "$STATE_ERR")"
+          else
+            STATE_CONTENT=$(echo "$STATE_RAW" | base64 -d 2>/dev/null || echo '{}')
+            if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
+              STATE="$STATE_CONTENT"
+            else
+              echo "::warning::State file is not valid JSON, starting with empty state."
+            fi
           fi
+          rm -f "$STATE_ERR"
         fi
         STATE_KEYS=$(echo "$STATE" | jq 'keys | length')
         echo "Loaded state file with $STATE_KEYS tracked PME(s)."
