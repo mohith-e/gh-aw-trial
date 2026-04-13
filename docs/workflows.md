@@ -30,6 +30,7 @@ These are end-to-end workflows that chain multiple agents together:
 | [agent-generate-tests](../workflows/agent-generate-tests.md) | PR labeled `agent:tests` | Generates tests for the PR's new behavior and pushes them back to the PR branch. Tests-only — never modifies source or existing tests |
 | [fix-failing-tests](../workflows/fix-failing-tests.md) | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review |
 | [agent-refactor](../workflows/agent-refactor.md) | Issue or PR labeled `agent:refactor` | Developer-directed, behavior-preserving refactor of one area per run. Modes: targeted (area named in issue body), sweep (agent picks an area), PR (refactor the PR's diff) |
+| [agent-review-pr](../workflows/agent-review-pr.md) | PR opened or reopened | Auto AI code review — analyzes the diff for correctness, security, and repo patterns; leaves up to 8 inline comments and submits one summary review with a per-dimension score |
 
 ## Recommended Upstream Workflows
 

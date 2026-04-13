@@ -44,6 +44,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `agent-generate-tests` | Generates tests for a PR's new behavior and pushes them back to the PR branch | PR labeled `agent:tests` |
 | `fix-failing-tests` | Diagnoses default-branch CI failures and opens a fix PR | CI failure on `main`, or issue labeled `agent:fix-tests` |
 | `agent-refactor` | Developer-directed, behavior-preserving refactor of one area per run | Issue or PR labeled `agent:refactor` |
+| `agent-review-pr` | Auto AI code review with inline comments and a summary score | PR opened or reopened |
 
 ### Recommended upstream workflows
 

@@ -54,6 +54,7 @@ The markdown body contains natural language instructions that Claude agents foll
 | `agent-generate-tests` | PR labeled `agent:tests` | Generates tests for the PR's new behavior and pushes them back to the PR branch. Tests-only — never modifies source or existing tests. See also upstream `daily-test-improver` for scheduled, incremental coverage improvement across the whole repo |
 | `fix-failing-tests` | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review. Pairs with upstream `pr-fix` (open PRs) and `ci-doctor` (diagnosis only) |
 | `agent-refactor` | Issue or PR labeled `agent:refactor` | Developer-directed, behavior-preserving refactor of one area per run. Modes: targeted (area in issue body), sweep (agent picks an area), PR (refactor the PR's diff) |
+| `agent-review-pr` | PR opened or reopened | Auto AI code review — analyzes the diff for correctness, security, and repo patterns; leaves up to 8 inline comments and submits one summary review with a per-dimension score |
 
 ## How Consumer Repos Use This
 
