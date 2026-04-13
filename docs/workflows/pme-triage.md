@@ -35,9 +35,9 @@ The PME triage agent runs on a schedule (every 6 hours) or manually via `workflo
 
 1. **Connectivity Check** — Verifies Salesforce OAuth authentication and access to the `Problem_Management_Escalation__c` object. If authentication fails, creates a setup issue with troubleshooting steps and stops.
 
-2. **Fetch Open PMEs** — Queries Salesforce via SOQL for open PMEs within the lookback window, optionally filtered by product. Returns PME details including priority, status, teams, and linked work items.
+2. **Fetch Open PMEs** — Queries Salesforce via SOQL for open PMEs within the lookback window, optionally filtered by product and/or priority. Returns PME details including priority, status, teams, and linked work items.
 
-3. **Cross-Reference & SF Write-Back** — Searches this repository's GitHub Issues for existing tracking issues (identified by the `pme-triage` label and PME name). Builds lists of already-tracked, untracked, and stale PMEs. For already-tracked PMEs, posts the GitHub issue link back to the Salesforce PME record as a Chatter comment (deduped via issue body marker).
+3. **Cross-Reference via State File** — Reads `pme-state.json` from repo memory (`memory/pme-triage` branch). PMEs already in the state file skip GitHub search entirely. PMEs with `issue_pending` status get backfilled with real issue numbers. Only PMEs not in the state file require a GitHub search. Builds lists of already-tracked, untracked, and stale PMEs. For already-tracked PMEs, posts the GitHub issue link back to the Salesforce PME record as a Chatter comment (deduped via state file and issue body marker).
 
 4. **Classify & Rank** — Groups related untracked PMEs, classifies each group as a **bug** or **enhancement** (P4 feature requests), scores by priority/age/cluster size, and detects **works-as-designed** behavior causing customer pain.
 
@@ -83,6 +83,7 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 
 ## Safety Guardrails
 
+- **Repo memory state** — Maintains `pme-state.json` on the `memory/pme-triage` branch. Known PMEs skip GitHub search on subsequent runs. New issues are recorded as `issue_pending` and backfilled with real issue numbers on the next run.
 - **Duplicate detection** — Checks for existing open issues with the `pme-triage` label before creating new ones
 - **Capped outputs** — Max 5 issues and 5 comments per run
 - **SF write-back gating** — Salesforce writes go through a custom safe output job (`sf-comment`), not MCP scripts. Comments are batched into a single call and the job only runs if the agent emits items. FeedItem deletion is disabled org-wide — all comments are permanent.
@@ -115,7 +116,7 @@ The agent step has a 10-minute timeout. Runs that create many issues can exceed 
 **Mitigations:**
 - Keep `create-issue: max` at 5 or lower. The 6-hour schedule means 4 runs/day × 5 issues = 20 issues/day.
 - Use `priority_filter` and `product_filter` to narrow the PME scope for manual dispatches.
-- Lower `pme_limit` if cross-referencing many PMEs is slow (each PME requires a GitHub search).
+- Lower `pme_limit` if runs are slow. Repo memory eliminates GitHub searches for known PMEs, but the first run for a new product filter still searches.
 
 **Diagnosing a timeout:**
 
@@ -144,28 +145,27 @@ The agent step has a 10-minute timeout. Runs that create many issues can exceed 
    ```
 3. Look for long gaps between a `CALL` and its `RESULT` — that's either a slow MCP tool or slow LLM output generation. A cluster of `create_issue` calls followed by `search_issues` or `list_issues` calls indicates the agent is searching for its own newly created issues (a known anti-pattern addressed by the "safe output timing" prompt note).
 
-## Future: Repo Memory for Cross-Reference State
+## Repo Memory
 
-The workflow currently cross-references PMEs against GitHub Issues on every run by searching for each PME name. gh-aw's [repo memory](https://github.github.com/gh-aw/reference/repo-memory/) can replace this with a persistent state file on a managed Git branch.
-
-**How it would work:** Enable `tools.repo-memory` in the workflow frontmatter. The agent maintains a `pme-state.json` file that maps each PME to its tracking status:
+The workflow uses gh-aw [repo memory](https://github.github.com/gh-aw/reference/repo-memory/) to maintain cross-reference state across runs. A `pme-state.json` file on the `memory/pme-triage` branch maps each PME to its tracking status:
 
 ```json
 {
   "PME-493502": {"status": "tracked", "issue": 135, "sf_writeback": true},
-  "PME-497398": {"status": "issue_pending", "title": "[P4 - Enhancement] PME-497398: ..."},
-  "PME-500128": {"status": "stale", "issue": 102, "last_modified": "2026-04-10"}
+  "PME-497398": {"status": "issue_pending", "title": "[Enhancement] AIM: ..."},
+  "PME-500128": {"status": "tracked", "issue": 102, "sf_writeback": false}
 }
 ```
 
-On each run, the agent reads the state file, diffs against the fresh Salesforce fetch, and only searches GitHub for PMEs not already in the file. This turns the cross-reference step from O(n) GitHub searches into a single file read for known PMEs.
+**How it works:**
+- On each run, the agent reads the state file and diffs against the fresh Salesforce fetch. PMEs already in the file skip GitHub search entirely.
+- New issues are recorded as `issue_pending`. On the next run, the agent finds the created issue, backfills the real issue number, and posts the SF write-back with a direct link.
+- The state file is committed and pushed via the `push_repo_memory` safe output at the end of each run.
 
-It also solves the issue-number backfill problem. On run N, the agent creates issues via safe outputs and records `"status": "issue_pending"` in the state file. On run N+1, the agent finds the created issue, updates the state to `"status": "tracked"` with the real issue number, and posts the SF write-back with a direct link. No searching for issues that don't exist yet.
-
-**Benefits even as a single workflow:**
-- Faster cross-referencing (file read vs. GitHub API calls)
-- Richer SF write-back (real issue links on the next run)
-- Audit trail of PME tracking state across runs (Git history on the memory branch)
+**Benefits:**
+- Faster cross-referencing — file read instead of O(n) GitHub API searches for known PMEs
+- Real issue links in SF write-back — backfilled on run N+1 instead of referencing by title only
+- Audit trail — Git history on the memory branch tracks state changes across runs
 
 ## Future: Orchestrator/Worker Split
 
