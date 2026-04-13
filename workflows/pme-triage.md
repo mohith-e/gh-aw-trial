@@ -250,23 +250,27 @@ Add the labels `pme-triage` to this issue using the `add-labels` safe output.
 
 ## Step 1: Fetch Open PMEs
 
-Construct a SOQL query to fetch open PMEs from the last ${{ inputs.lookback_days }} days. Call `sf-query` with this query:
+Construct a SOQL query to fetch open PMEs from the last ${{ inputs.lookback_days }} days. Build the query by starting with the base WHERE clause and appending any active filters:
 
+**Base query:**
 ```
-SELECT Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${{ inputs.lookback_days }} ORDER BY Priority__c ASC, CreatedDate ASC LIMIT ${{ inputs.pme_limit }}
-```
-
-If `${{ inputs.product_filter }}` is not empty, add this condition to the WHERE clause before the ORDER BY:
-
-```
-AND Support_Product_Name__c LIKE '${{ inputs.product_filter }}'
+SELECT Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate
+FROM Problem_Management_Escalation__c
+WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved')
+  AND CreatedDate >= LAST_N_DAYS:${{ inputs.lookback_days }}
 ```
 
-If `${{ inputs.priority_filter }}` is not empty, add this condition to the WHERE clause before the ORDER BY:
+**Active filters — append these to the WHERE clause if the value is non-empty:**
+- Product filter (`${{ inputs.product_filter }}`): `AND Support_Product_Name__c LIKE '${{ inputs.product_filter }}'`
+- Priority filter (`${{ inputs.priority_filter }}`): `AND Priority__c LIKE '${{ inputs.priority_filter }}'`
 
+**Then append the ORDER BY and LIMIT:**
 ```
-AND Priority__c LIKE '${{ inputs.priority_filter }}'
+ORDER BY Priority__c ASC, CreatedDate ASC
+LIMIT ${{ inputs.pme_limit }}
 ```
+
+Call `sf-query` with the assembled query.
 
 After retrieving results:
 
