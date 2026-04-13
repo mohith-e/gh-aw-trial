@@ -277,7 +277,7 @@ After retrieving results:
 
 ### 2a: Load state file
 
-Read `/tmp/gh-aw/repo-memory-default/pme-state.json` from repo memory. If the file does not exist (first run), start with an empty object `{}`.
+Read `/tmp/gh-aw/repo-memory/default/pme-state.json` from repo memory. If the file does not exist (first run), start with an empty object `{}`.
 
 The state file maps PME names to their tracking status:
 
@@ -613,7 +613,7 @@ If no comments were collected (e.g., all PMEs already had write-back markers), s
 
 ### Save state file
 
-Write the updated state file to `/tmp/gh-aw/repo-memory-default/pme-state.json`. This file is automatically committed and pushed to the `memory/pme-triage` branch after the run completes. Include all PMEs processed during this run — both newly added entries and updated existing entries.
+Write the updated state file to `/tmp/gh-aw/repo-memory/default/pme-state.json`. Include all PMEs processed during this run — both newly added entries and updated existing entries. Then call the `push_repo_memory` safe output to commit and push the state file to the `memory/pme-triage` branch.
 
 ## Final Summary
 
