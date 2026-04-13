@@ -27,7 +27,7 @@ on:
         default: "PME "
 
 permissions:
-  contents: write
+  contents: read
   issues: read
   pull-requests: read
 
