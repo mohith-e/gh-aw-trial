@@ -71,7 +71,7 @@ Help me build a structured, rehearsable **1-hour demo** with the following segme
     - RealPage/agentics/workflows/prd-generation.md@v0.1.0
   ```
 - Compare to STRATIS BORG's 3-step wizard: "You have a great wizard. gh-aw's equivalent is a markdown file and `gh aw compile`. Different approach, same outcome — making it dead simple to stand up a workflow."
-- Show the `examples/` directory — ready-to-use consumer stubs
+- Run `gh aw add-wizard RealPage/agentics/workflows/prd-generation.md` live — show the wizard generating the consumer stub automatically
 
 ### Segment 5: End-to-End SDLC Demo with lumina-agents-mcp (20 min)
 
@@ -104,7 +104,7 @@ This is the centerpiece. Use the [lumina-agents-mcp](https://github.com/RealPage
   3. Issue Creation (deduplication, severity labels)
   4. Implementation (confidence-gated — only fixes high/medium confidence)
   5. Summary
-- Show the consumer stub in `examples/auto-remediation.md` — "This is all a team needs to add to their repo. The shared workflow handles the logic."
+- Describe the consumer stub: "All a team adds to their repo is a ~20-line markdown file that declares the schedule trigger and imports the shared workflow. The `gh aw add-wizard` command generates it for them. The shared workflow handles the logic."
 - Key message: "You built a custom platform to do this with Sentry. With gh-aw, a team can add this capability to any GitHub repo by dropping in a 26-line markdown file, pointing it at their Elastic instance, and running `gh aw compile`. The pattern is the same — discover errors, triage, fix, PR — but it runs on GitHub Actions with no custom infrastructure."
 - Show how easy it would be to swap Elastic for Sentry by adding a Sentry MCP server in the `mcp-servers:` block
 
@@ -122,7 +122,7 @@ This is the centerpiece. Use the [lumina-agents-mcp](https://github.com/RealPage
 
 - Reiterate complementary positioning: "STRATIS BORG is great for your Azure DevOps teams. gh-aw is great for your GitHub teams. Together, you cover your entire engineering org."
 - Call to action: "For any team on GitHub today, they can start with one workflow — maybe auto-remediation or PRD generation — and grow from there. No platform to deploy, no infrastructure to maintain."
-- Share resources: gh-aw docs, agentics repo, agentic-workflow-template repo, Agent Factory blog series
+- Share resources: gh-aw docs, RealPage/agentics repo, githubnext/agentics upstream library, Agent Factory blog series
 
 ## Key Constraints
 

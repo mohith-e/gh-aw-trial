@@ -81,9 +81,9 @@ gh aw add-wizard RealPage/agentics/workflows/mcp-selection.md@v0.2.0
 
 ### 5. Implementation
 
-**Trigger:** Issue labeled `ready-for-implementation`
+**Trigger:** Issue labeled `agent:implement`
 
-This workflow is **project-specific** and not included in this library — it references your codebase paths, test commands, and tech stack. Use the [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
+Use [`implement-issue`](../../workflows/implement-issue.md) as the default implementation agent — it discovers your repo's stack, test commands, and conventions at runtime so it works out of the box. Customize it for your repo once you want faster, more predictable runs (see [`docs/workflows/implement-issue.md`](implement-issue.md) for upgrade prompts).
 
 ### 6. Validation
 

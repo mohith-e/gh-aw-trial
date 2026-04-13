@@ -268,9 +268,8 @@ This is where the audience starts thinking "I could do this." Show the simplicit
 - Switch to **terminal tab 1** (agentics)
 
 ```bash
-# Show the repo structure — shared logic vs consumer stubs
-ls workflows/    # ← workflow definitions (imported by consumers)
-ls examples/  # ← consumer stubs (what gh aw add pulls)
+# Show the repo structure — every workflow is a markdown file
+ls workflows/    # ← workflow definitions imported by consumers via gh aw add
 ```
 
 ```bash
@@ -298,12 +297,7 @@ You are a product requirements analyst...
 >
 > Compare this to writing a GitHub Actions workflow from scratch — or building a custom platform. This is a markdown file."
 
-```bash
-# Now show a consumer stub — this is what teams actually put in their repo
-cat examples/prd-generation.md
-```
-
-> "And here's the consumer side — 13 lines. It declares the triggers and imports the shared logic. The consumer doesn't duplicate anything."
+> "On the consumer side, a team adds a tiny stub to their own `.github/workflows/` — roughly 10-15 lines — that declares the triggers and imports the shared workflow from this repo. The `gh aw add-wizard` command we'll use in a moment generates that stub for them automatically, so there's nothing to hand-write. The consumer doesn't duplicate anything — they just import."
 
 **Step 3: `gh aw add-wizard` — the interactive way** (3 min)
 - Switch to **terminal tab 2** (lumina-agents-mcp)
@@ -616,14 +610,9 @@ Walk through each stage:
 >
 > **Stage 5: Summary.** A workflow summary with everything that happened — errors discovered, issues created, PRs opened, duplicates skipped."
 
-**Step 2: Show the consumer stub** (1 min)
+**Step 2: Describe the consumer stub** (1 min)
 
-```bash
-# Show the consumer stub — this is ALL a team puts in their repo
-cat examples/auto-remediation.md
-```
-
-> "Here's all a team needs to add to their repo — 26 lines. Declares the hourly schedule trigger, the manual dispatch inputs for overrides and dry-run mode, and the import. That's it. Add this file, set three secrets — `SERVICE_NAME`, `ELASTIC_MCP_URL`, `ELASTIC_MCP_API_KEY` — run `gh aw compile`, and your repo has automated error remediation."
+> "All a team needs to add to their own repo is a tiny stub file — roughly 20-30 lines — that declares the hourly schedule trigger, the manual dispatch inputs for overrides and dry-run mode, and a single import line pointing at the shared workflow in this library. The `gh aw add-wizard auto-remediation` command generates that stub for them. Once it's in place, set three secrets — `SERVICE_NAME`, `ELASTIC_MCP_URL`, `ELASTIC_MCP_API_KEY` — run `gh aw compile`, and the repo has automated error remediation."
 
 **Step 3: Swapping Elastic for Sentry** (1 min)
 

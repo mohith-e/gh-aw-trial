@@ -11,7 +11,6 @@ This repo contains **no application code, no build system, no tests**. It is ent
 ## Repository Structure
 
 - `workflows/` — The canonical workflow definitions imported by consumer repos. **This is the primary source of truth.**
-- `examples/` — Example consumer stubs showing the YAML frontmatter (triggers, permissions, imports) that consumer repos use in `.github/workflows/`.
 - `docs/workflows.md` — Detailed workflow reference with pipeline diagrams.
 - `docs/prds/templates/` — PRD template used by the `prd-generation` workflow.
 - `docs/demos/` — Demo scripts and presentation materials.

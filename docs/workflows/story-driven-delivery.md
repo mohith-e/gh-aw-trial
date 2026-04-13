@@ -312,9 +312,11 @@ gh aw add-wizard RealPage/agentics/workflows/story-decomposition.md@v0.2.0
 
 ### 2. Implementation Workflow
 
-The implementation workflow is **project-specific** — it references your codebase paths, test commands, and tech stack. It is not included in this shared library.
+```bash
+gh aw add-wizard RealPage/agentics/workflows/implement-issue.md@v0.3.0
+```
 
-Use the [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point, then customize for your project.
+Use [`implement-issue`](../../workflows/implement-issue.md) as the default implementation agent. It discovers your repo's stack, test commands, and conventions at runtime so it works out of the box. Customize it for your repo once you want faster, more predictable runs (see [`docs/workflows/implement-issue.md`](implement-issue.md) for upgrade prompts).
 
 ### 3. Validation Workflow
 

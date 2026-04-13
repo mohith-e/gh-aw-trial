@@ -41,8 +41,6 @@ These workflows live in [`githubnext/agentics`](https://github.com/githubnext/ag
 | [pr-fix](https://github.com/githubnext/agentics/blob/main/workflows/pr-fix.md) | Comment `/pr-fix` on a PR | Pushes a fix directly to the PR branch when its CI is failing |
 | [ci-doctor](https://github.com/githubnext/agentics/blob/main/workflows/ci-doctor.md) | Monitored `workflow_run` completes with failure | Diagnostic only — opens an issue with root-cause analysis |
 
-> **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
-
 ## How Workflows Work
 
 Each workflow is a markdown file with YAML frontmatter that declares the AI engine, safety constraints, and optional MCP server connections. The body contains natural language instructions that the agent follows.
