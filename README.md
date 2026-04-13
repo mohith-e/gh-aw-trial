@@ -43,6 +43,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
 | `agent-generate-tests` | Generates tests for a PR's new behavior and pushes them back to the PR branch | PR labeled `agent:tests` |
 | `fix-failing-tests` | Diagnoses default-branch CI failures and opens a fix PR | CI failure on `main`, or issue labeled `agent:fix-tests` |
+| `agent-refactor` | Developer-directed, behavior-preserving refactor of one area per run | Issue or PR labeled `agent:refactor` |
 
 ### Recommended upstream workflows
 
