@@ -122,7 +122,8 @@ on:
         # for the memory branch and fetch the state file via raw content.
         MEMORY_BRANCH_REF=$(gh api "repos/$REPO/git/ref/heads/memory/pme-triage" --jq '.ref' 2>/dev/null || echo '')
         if [ -n "$MEMORY_BRANCH_REF" ]; then
-          STATE_CONTENT=$(gh api "repos/$REPO/contents/memory/pme-triage/pme-state.json?ref=memory/pme-triage" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}')
+          # File is at the root of the memory branch (not under a subdirectory)
+          STATE_CONTENT=$(gh api "repos/$REPO/contents/pme-state.json?ref=memory/pme-triage" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}')
           if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
             STATE="$STATE_CONTENT"
           fi
