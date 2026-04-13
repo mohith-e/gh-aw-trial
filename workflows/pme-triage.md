@@ -27,7 +27,7 @@ on:
         default: "PME "
 
 permissions:
-  contents: read
+  contents: write
   issues: read
   pull-requests: read
 
@@ -46,6 +46,12 @@ network:
 tools:
   github:
     toolsets: [default]
+  repo-memory:
+    branch-name: memory/pme-triage
+    description: "PME tracking state — cross-reference cache and issue-number backfill"
+    allowed-extensions: [".json"]
+    max-file-size: 1048576
+    max-file-count: 5
 
 mcp-scripts:
   sf-query:
@@ -267,32 +273,56 @@ After retrieving results:
 - If the `records` array is empty or `totalSize` is 0, stop and report: "No open PMEs found in the last ${{ inputs.lookback_days }} days."
 - Otherwise, note the total count and proceed.
 
-## Step 2: Cross-Reference Against GitHub Issues
+## Step 2: Cross-Reference Against State File and GitHub Issues
 
-For each PME returned from Salesforce, search for existing open GitHub Issues in this repository that:
-- Have the `pme-triage` label
-- Contain the PME `Name` (e.g., `PME-00001`) in the issue title or body
+### 2a: Load state file
+
+Read `/tmp/gh-aw/repo-memory-default/pme-state.json` from repo memory. If the file does not exist (first run), start with an empty object `{}`.
+
+The state file maps PME names to their tracking status:
+
+```json
+{
+  "PME-493502": {"status": "tracked", "issue": 135, "sf_writeback": true},
+  "PME-497398": {"status": "issue_pending", "title": "[Enhancement] AIM: ..."},
+  "PME-500128": {"status": "tracked", "issue": 102, "sf_writeback": false}
+}
+```
+
+### 2b: Backfill pending issues
+
+For any PME in the state file with `"status": "issue_pending"`, search GitHub Issues for an open issue with the `pme-triage` label whose title contains the PME `Name`. If found, update the state entry to `"status": "tracked"` with the issue number. If not found, leave as `"issue_pending"` — it may still be processing.
+
+### 2c: Classify fetched PMEs
+
+For each PME returned from Salesforce in Step 1, check the state file first:
+
+- **In state file with `"status": "tracked"`** — already tracked. Check if the PME's `LastModifiedDate` is more than 24 hours after the issue was created to detect staleness.
+- **In state file with `"status": "issue_pending"`** — issue creation was submitted on a prior run but not yet confirmed. Treat as already tracked (do not create a duplicate).
+- **Not in state file** — search GitHub Issues for an open issue with the `pme-triage` label containing the PME `Name` in the title or body. If found, add to the state file as `"tracked"`. If not found, classify as untracked.
 
 Build three lists:
 
-1. **Already tracked** — PMEs that have a matching open GitHub issue and the issue is up to date (the PME's `LastModifiedDate` is not significantly newer than the issue creation date)
-2. **Untracked** — PMEs with no matching open GitHub issue
-3. **Stale** — PMEs that have a matching open GitHub issue, but the PME's `LastModifiedDate` is more than 24 hours after the issue was created (indicating the PME has been updated since the issue was filed)
+1. **Already tracked** — PMEs with a matching issue that is up to date
+2. **Untracked** — PMEs with no matching issue
+3. **Stale** — PMEs with a matching issue where `LastModifiedDate` is more than 24 hours after issue creation
 
-If all PMEs are already tracked and none are stale, stop and report: "All $N PMEs are already tracked. No action needed."
+If all PMEs are already tracked and none are stale, save the state file and stop: "All $N PMEs are already tracked. No action needed."
 
-### 2b: Write back issue links to Salesforce
+### 2d: Write back issue links to Salesforce
 
-For each PME in the **already tracked** list that has a matching open GitHub issue, post the GitHub issue link back to the PME record in Salesforce using the `sf-comment` safe output job.
+For each PME in the **already tracked** list where the state file has `"sf_writeback": false` (or the field is missing), post the GitHub issue link back to the PME record in Salesforce.
 
-To avoid duplicate comments on repeated runs, check whether the GitHub issue body already contains a note that the SF write-back was completed. Look for the string `SF write-back: done` in the issue body. If present, skip the write-back for that PME.
+To avoid duplicate comments, also check whether the GitHub issue body contains the string `SF write-back: done`. If present, set `"sf_writeback": true` in the state file and skip.
 
-If the issue body does not contain this marker, add an entry to the SF comments batch:
+If not yet written back, add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
 
-> **Note:** FeedItem cannot be queried by ParentId via SOQL (Salesforce platform restriction). Use the GitHub issue body as the dedup source of truth, not Salesforce. If the dedup check is inconclusive, proceed with the write-back — a duplicate comment is preferable to no write-back at all.
+Then set `"sf_writeback": true` in the state entry.
+
+> **Note:** FeedItem cannot be queried by ParentId via SOQL (Salesforce platform restriction). Use the GitHub issue body and the state file as dedup sources, not Salesforce.
 
 ## Step 3: Group and Rank Untracked PMEs
 
@@ -535,7 +565,17 @@ For each PME included in a newly created GitHub issue, add an entry to the SF co
 - `record_id`: the PME's Salesforce `Id`
 - `comment`: `"GitHub Issue Created: {issue_title}\nRepository: {owner}/{repo}"`
 
-Since issue numbers are not available at this point (safe outputs are processed after your session ends), reference the issue by title. The next scheduled run will match the created issue and post the direct link via Step 2b.
+Since issue numbers are not available at this point (safe outputs are processed after your session ends), reference the issue by title. The next scheduled run will backfill the issue number via Step 2b.
+
+### Update state file
+
+For each PME included in a newly created issue, add or update its entry in the state file:
+
+```json
+{"status": "issue_pending", "title": "{issue_title}", "sf_writeback": false}
+```
+
+The next run's Step 2b will backfill the issue number once the safe output has been processed.
 
 ## Step 5: Update Stale Tracking Issues
 
@@ -570,6 +610,10 @@ After completing Steps 2b, 4, and 5, call the `sf-comment` safe output job exact
 - `comments_json`: a JSON array of `{"record_id": "...", "comment": "..."}` objects
 
 If no comments were collected (e.g., all PMEs already had write-back markers), skip this call.
+
+### Save state file
+
+Write the updated state file to `/tmp/gh-aw/repo-memory-default/pme-state.json`. This file is automatically committed and pushed to the `memory/pme-triage` branch after the run completes. Include all PMEs processed during this run — both newly added entries and updated existing entries.
 
 ## Final Summary
 
