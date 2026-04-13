@@ -144,6 +144,15 @@ The agent step has a 10-minute timeout. Runs that create many issues can exceed 
    ```
 3. Look for long gaps between a `CALL` and its `RESULT` — that's either a slow MCP tool or slow LLM output generation. A cluster of `create_issue` calls followed by `search_issues` or `list_issues` calls indicates the agent is searching for its own newly created issues (a known anti-pattern addressed by the "safe output timing" prompt note).
 
+## Future: Orchestrator/Worker Split
+
+If the single-workflow approach hits scaling limits (e.g., needing to process more PMEs per cycle than one agent can handle within the timeout), the pipeline can be split into two stages using the gh-aw `dispatch-workflow` orchestration pattern:
+
+1. **Orchestrator** — Fetches PMEs from Salesforce, cross-references against GitHub Issues, writes the untracked PME list to a JSON file on a short-lived branch, then dispatches the worker with the branch ref as input.
+2. **Worker** — Checks out the branch, reads the context file, groups/scores PMEs, creates issues, and posts SF write-back. The branch is cleaned up after the worker completes.
+
+Each stage gets its own 10-minute timeout. The branch serves as the data-passing mechanism — no payload size limits, no encoding issues, and the branch itself is an audit trail of what the orchestrator passed to the worker.
+
 ## Future: TFS Cross-Referencing
 
 The workflow currently cross-references against GitHub Issues only. A future version will add support for checking TFS work items via `Azure_DevOps_ID__c` fields on the PME object, using the TFS REST API. This requires self-hosted runners with network access to `tfs.realpage.com`.
