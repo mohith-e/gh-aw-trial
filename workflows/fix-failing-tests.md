@@ -1,8 +1,10 @@
 ---
 on:
   workflow_run:
-    workflows: ["*"]  # Consumer repos should replace "*" with specific CI workflow names (e.g., ["CI", "Tests"]) to avoid unnecessary agent invocations on non-test workflows
+    workflows: ["CI"]  # Replace "CI" with the name(s) of your actual test/build workflows (e.g., ["CI", "Tests", "Build"]). Using ["*"] is NOT recommended — it fires on every workflow completion including this one, causing cascading runs and wasted API credits.
     types: [completed]
+    branches:
+      - main
   issues:
     types: [labeled]
   workflow_dispatch:

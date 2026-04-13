@@ -10,7 +10,9 @@ Works alongside two upstream workflows from `githubnext/agentics` that cover adj
 gh aw add RealPage/agentics/fix-failing-tests
 ```
 
-By default, the workflow triggers on any `workflow_run` completion. It exits early if the run was successful, on a non-default branch, or is a self-generated run (like `daily-*` workflows). You can also trigger it manually by labeling an issue `agent:fix-tests` with a link to the failing run, or via `workflow_dispatch`.
+After installing, open `.github/workflows/fix-failing-tests.md` and replace `"CI"` in the `workflows:` list with the actual name(s) of your CI/test workflows (e.g., `["CI", "Tests", "Build"]`). Then run `gh aw compile`. The workflow only fires on the default branch (`main`) and only when one of the named workflows completes with a failure.
+
+You can also trigger it manually by labeling an issue `agent:fix-tests` with a link to the failing run, or via `workflow_dispatch`.
 
 ## Test-Failure Fix Workflows at a Glance
 
