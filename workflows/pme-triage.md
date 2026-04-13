@@ -118,9 +118,11 @@ on:
         #──────────────────────────────────────────────
         echo "::group::State file"
         STATE='{}'
-        if git ls-remote --heads origin memory/pme-triage | grep -q memory/pme-triage; then
-          git fetch origin memory/pme-triage --depth=1 2>/dev/null || true
-          STATE_CONTENT=$(git show FETCH_HEAD:memory/pme-triage/pme-state.json 2>/dev/null || echo '{}')
+        # No git checkout in pre_activation, so use the GitHub API to check
+        # for the memory branch and fetch the state file via raw content.
+        MEMORY_BRANCH_REF=$(gh api "repos/$REPO/git/ref/heads/memory/pme-triage" --jq '.ref' 2>/dev/null || echo '')
+        if [ -n "$MEMORY_BRANCH_REF" ]; then
+          STATE_CONTENT=$(gh api "repos/$REPO/contents/memory/pme-triage/pme-state.json?ref=memory/pme-triage" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}')
           if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
             STATE="$STATE_CONTENT"
           fi
