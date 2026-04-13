@@ -27,6 +27,7 @@ on:
         description: "Optional prefix for created issue titles"
         default: "PME "
   permissions:
+    contents: read
     issues: read
   steps:
     - name: Fetch PME context (SF + GitHub + state)
@@ -545,7 +546,7 @@ Call `sf-comment` exactly **once** with all collected comments as a `comments_js
 
 ### Save state file
 
-Write the updated state to `/tmp/gh-aw/repo-memory/default/pme-state.json`. Then call `push_repo_memory`.
+Write the updated state to `/tmp/gh-aw/repo-memory/default/pme-state.json`. The framework automatically pushes this file to the `memory/pme-triage` branch after your session ends.
 
 ### Summary
 
