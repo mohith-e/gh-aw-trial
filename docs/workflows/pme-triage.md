@@ -104,6 +104,46 @@ The workflow uses the following labels if they exist in the consumer repository.
 - `enhancement-backlog` — P4 enhancement/feature-request PME clusters for product review
 - `wad:customer-impact` — PMEs describing works-as-designed behavior causing customer pain
 
+## Troubleshooting
+
+### Agent timeouts
+
+The agent step has a 10-minute timeout. Runs that create many issues can exceed this because each issue body requires significant LLM output tokens. The pipeline itself (SF fetch, cross-reference, grouping) is fast — typically under 1 minute. Issue creation dominates the time budget.
+
+**Symptoms:** The workflow completes with `conclusion: failure`, but `safe_outputs` succeeds — meaning the agent produced output before the timeout killed it. Created issues may be missing labels or SF write-back comments.
+
+**Mitigations:**
+- Keep `create-issue: max` at 5 or lower. The 6-hour schedule means 4 runs/day × 5 issues = 20 issues/day.
+- Use `priority_filter` and `product_filter` to narrow the PME scope for manual dispatches.
+- Lower `pme_limit` if cross-referencing many PMEs is slow (each PME requires a GitHub search).
+
+**Diagnosing a timeout:**
+
+1. Run `gh aw audit <run-id>` for a high-level breakdown of turns, tool calls, and token usage.
+2. Parse the agent conversation from the audit logs to identify where time was spent:
+   ```bash
+   # List downloaded audit logs
+   ls .github/aw/logs/
+
+   # Parse the agent conversation timeline
+   python3 -c "
+   import json
+   with open('.github/aw/logs/run-<id>/agent-stdio.log') as f:
+       for line in f:
+           try:
+               e = json.loads(line.strip())
+               ts = e.get('timestamp','')[:19]
+               if e['type'] == 'assistant':
+                   for c in e['message']['content']:
+                       if c['type'] == 'tool_use':
+                           print(f'{ts}  CALL  {c[\"name\"]}')
+               elif e['type'] == 'user' and ts:
+                   print(f'{ts}  RESULT')
+           except: pass
+   "
+   ```
+3. Look for long gaps between a `CALL` and its `RESULT` — that's either a slow MCP tool or slow LLM output generation. A cluster of `create_issue` calls followed by `search_issues` or `list_issues` calls indicates the agent is searching for its own newly created issues (a known anti-pattern addressed by the "safe output timing" prompt note).
+
 ## Future: TFS Cross-Referencing
 
 The workflow currently cross-references against GitHub Issues only. A future version will add support for checking TFS work items via `Azure_DevOps_ID__c` fields on the PME object, using the TFS REST API. This requires self-hosted runners with network access to `tfs.realpage.com`.
