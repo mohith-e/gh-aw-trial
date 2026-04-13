@@ -1,9 +1,9 @@
 ---
 description: |
-  PME triage workflow. Pre-step authenticates to Salesforce and fetches open
-  Problem Management Escalations via SOQL, lists existing GitHub tracking issues,
-  and checks label availability — all deterministically. The agent reads the
-  pre-computed context, groups/scores/classifies PMEs, creates GitHub issues for
+  PME triage workflow. Agent-level pre-step fetches existing GitHub tracking
+  issues, checks label availability, and loads state — all deterministically.
+  The agent calls sf-query once for Salesforce data, reads the pre-computed
+  GitHub context, groups/scores/classifies PMEs, creates GitHub issues for
   untracked PMEs, and writes triage results back to Salesforce.
   Detects enhancement clusters and works-as-designed customer pain.
 
@@ -26,138 +26,6 @@ on:
       title_prefix:
         description: "Optional prefix for created issue titles"
         default: "PME "
-  steps:
-    - name: Fetch PME context (SF + GitHub + state)
-      env:
-        SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
-        SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
-        GH_TOKEN: "${{ github.token }}"
-        PRODUCT_FILTER: "${{ inputs.product_filter }}"
-        PRIORITY_FILTER: "${{ inputs.priority_filter }}"
-        LOOKBACK_DAYS: "${{ inputs.lookback_days || '30' }}"
-        PME_LIMIT: "${{ inputs.pme_limit || '25' }}"
-        REPO: "${{ github.repository }}"
-      run: |
-        set -euo pipefail
-        mkdir -p /tmp/gh-aw/agent
-
-        #──────────────────────────────────────────────
-        # 1. Salesforce authentication
-        #──────────────────────────────────────────────
-        echo "::group::Salesforce authentication"
-        if [ -z "${SF_CLIENT_ID:-}" ] || [ -z "${SF_CLIENT_SECRET:-}" ]; then
-          echo '{"sf_auth_error": "SF_OAUTH_CLIENT_ID or SF_OAUTH_SECRET not configured"}' > /tmp/gh-aw/agent/pme-context.json
-          echo "::error::Salesforce credentials not configured"
-          echo "::endgroup::"
-          exit 0
-        fi
-        AUTH=$(curl -s -X POST "https://realpage.my.salesforce.com/services/oauth2/token" \
-          -d "grant_type=client_credentials" \
-          -d "client_id=$SF_CLIENT_ID" \
-          -d "client_secret=$SF_CLIENT_SECRET")
-        TOKEN=$(echo "$AUTH" | jq -r '.access_token')
-        if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-          echo "{\"sf_auth_error\": $(echo "$AUTH" | jq -c .)}" > /tmp/gh-aw/agent/pme-context.json
-          echo "::error::Salesforce authentication failed"
-          echo "::endgroup::"
-          exit 0
-        fi
-        echo "Authenticated to Salesforce successfully."
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 2. SOQL query — fetch open PMEs
-        #──────────────────────────────────────────────
-        echo "::group::SOQL query"
-        QUERY="SELECT Id, Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${LOOKBACK_DAYS}"
-        if [ -n "${PRODUCT_FILTER:-}" ]; then
-          QUERY="${QUERY} AND Support_Product_Name__c LIKE '${PRODUCT_FILTER}'"
-        fi
-        if [ -n "${PRIORITY_FILTER:-}" ]; then
-          QUERY="${QUERY} AND Priority__c LIKE '${PRIORITY_FILTER}'"
-        fi
-        QUERY="${QUERY} ORDER BY Priority__c ASC, CreatedDate ASC LIMIT ${PME_LIMIT}"
-        echo "Query: $QUERY"
-        SF_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
-          -H "Authorization: Bearer $TOKEN" \
-          --data-urlencode "q=$QUERY")
-        PME_COUNT=$(echo "$SF_RESULT" | jq '.totalSize // 0')
-        echo "Fetched $PME_COUNT PME(s) from Salesforce."
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 3. GitHub issues with pme-triage label
-        #──────────────────────────────────────────────
-        echo "::group::GitHub issues"
-        GH_ISSUES=$(gh issue list --repo "$REPO" --label pme-triage --state open --limit 200 \
-          --json number,title,body,createdAt,labels 2>/dev/null || echo '[]')
-        GH_ISSUE_COUNT=$(echo "$GH_ISSUES" | jq 'length')
-        echo "Found $GH_ISSUE_COUNT existing pme-triage issue(s)."
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 4. Label existence check
-        #──────────────────────────────────────────────
-        echo "::group::Label check"
-        LABELS_TO_CHECK='["pme-triage","priority:critical","priority:high","priority:medium","priority:low","enhancement-backlog","wad:customer-impact"]'
-        LABELS_EXIST='{}' 
-        for LABEL in $(echo "$LABELS_TO_CHECK" | jq -r '.[]'); do
-          if gh label list --repo "$REPO" --search "$LABEL" --limit 1 --json name 2>/dev/null | jq -e --arg l "$LABEL" 'any(.[]; .name == $l)' > /dev/null 2>&1; then
-            LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): true}')
-          else
-            LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): false}')
-          fi
-        done
-        echo "Labels: $LABELS_EXIST"
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 5. State file from repo-memory
-        #──────────────────────────────────────────────
-        echo "::group::State file"
-        STATE='{}'
-        if git ls-remote --heads origin memory/pme-triage | grep -q memory/pme-triage; then
-          git fetch origin memory/pme-triage --depth=1 2>/dev/null || true
-          STATE_CONTENT=$(git show FETCH_HEAD:memory/pme-triage/pme-state.json 2>/dev/null || echo '{}')
-          if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
-            STATE="$STATE_CONTENT"
-          fi
-        fi
-        STATE_KEYS=$(echo "$STATE" | jq 'keys | length')
-        echo "Loaded state file with $STATE_KEYS tracked PME(s)."
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 6. Assemble context file
-        #──────────────────────────────────────────────
-        jq -n \
-          --argjson sf_pmes "$SF_RESULT" \
-          --argjson gh_issues "$GH_ISSUES" \
-          --argjson labels "$LABELS_EXIST" \
-          --argjson state "$STATE" \
-          --arg product_filter "${PRODUCT_FILTER:-}" \
-          --arg priority_filter "${PRIORITY_FILTER:-}" \
-          --arg lookback_days "$LOOKBACK_DAYS" \
-          --arg pme_limit "$PME_LIMIT" \
-          --arg repo "$REPO" \
-          '{
-            run_params: {
-              product_filter: $product_filter,
-              priority_filter: $priority_filter,
-              lookback_days: ($lookback_days | tonumber),
-              pme_limit: ($pme_limit | tonumber),
-              repo: $repo
-            },
-            sf_pmes: $sf_pmes,
-            gh_issues: $gh_issues,
-            labels: $labels,
-            state: $state
-          }' > /tmp/gh-aw/agent/pme-context.json
-
-        echo "Context file written: $(wc -c < /tmp/gh-aw/agent/pme-context.json) bytes"
-        echo "  PMEs from SF: $PME_COUNT"
-        echo "  Existing issues: $GH_ISSUE_COUNT"
-        echo "  State entries: $STATE_KEYS"
 
 permissions:
   contents: read
@@ -169,6 +37,7 @@ engine: claude
 network:
   allowed:
     - defaults
+    - "realpage.my.salesforce.com"
     # tfs.realpage.com: listed to prevent AWF from redacting TFS URLs in safe
     # outputs (e.g., Azure_DevOps_URL__c links). On GitHub-hosted runners this
     # host is unreachable; on self-hosted runners with VPN access it will also
@@ -184,6 +53,102 @@ tools:
     allowed-extensions: [".json"]
     max-file-size: 1048576
     max-file-count: 5
+
+mcp-scripts:
+  sf-query:
+    description: "Authenticate to Salesforce via OAuth client_credentials and execute a SOQL query. Returns results as JSON."
+    inputs:
+      query:
+        type: string
+        required: true
+        description: "The SOQL query to execute"
+    run: |
+      AUTH=$(curl -s -X POST "https://realpage.my.salesforce.com/services/oauth2/token" \
+        -d "grant_type=client_credentials" \
+        -d "client_id=$SF_CLIENT_ID" \
+        -d "client_secret=$SF_CLIENT_SECRET")
+      TOKEN=$(echo "$AUTH" | jq -r '.access_token')
+      if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+        echo "$AUTH"
+        exit 1
+      fi
+      curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
+        -H "Authorization: Bearer $TOKEN" \
+        --data-urlencode "q=$INPUT_QUERY"
+    env:
+      SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
+      SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
+    timeout: 30
+
+steps:
+  - name: Fetch GitHub context (issues + labels + state)
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      REPO: "${{ github.repository }}"
+    run: |
+      set -euo pipefail
+      mkdir -p /tmp/gh-aw/agent
+
+      #──────────────────────────────────────────────
+      # 1. GitHub issues with pme-triage label
+      #──────────────────────────────────────────────
+      echo "::group::GitHub issues"
+      GH_ISSUES=$(gh issue list --repo "$REPO" --label pme-triage --state open --limit 200 \
+        --json number,title,body,createdAt,labels 2>/dev/null || echo '[]')
+      GH_ISSUE_COUNT=$(echo "$GH_ISSUES" | jq 'length')
+      echo "Found $GH_ISSUE_COUNT existing pme-triage issue(s)."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 2. Label existence check
+      #──────────────────────────────────────────────
+      echo "::group::Label check"
+      LABELS_TO_CHECK='["pme-triage","priority:critical","priority:high","priority:medium","priority:low","enhancement-backlog","wad:customer-impact"]'
+      LABELS_EXIST='{}'
+      for LABEL in $(echo "$LABELS_TO_CHECK" | jq -r '.[]'); do
+        if gh label list --repo "$REPO" --search "$LABEL" --limit 1 --json name 2>/dev/null | jq -e --arg l "$LABEL" 'any(.[]; .name == $l)' > /dev/null 2>&1; then
+          LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): true}')
+        else
+          LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): false}')
+        fi
+      done
+      echo "Labels: $LABELS_EXIST"
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 3. State file from repo-memory
+      #──────────────────────────────────────────────
+      echo "::group::State file"
+      STATE='{}'
+      if git ls-remote --heads origin memory/pme-triage | grep -q memory/pme-triage; then
+        git fetch origin memory/pme-triage --depth=1 2>/dev/null || true
+        STATE_CONTENT=$(git show FETCH_HEAD:memory/pme-triage/pme-state.json 2>/dev/null || echo '{}')
+        if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
+          STATE="$STATE_CONTENT"
+        fi
+      fi
+      STATE_KEYS=$(echo "$STATE" | jq 'keys | length')
+      echo "Loaded state file with $STATE_KEYS tracked PME(s)."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 4. Assemble partial context file
+      #──────────────────────────────────────────────
+      jq -n \
+        --argjson gh_issues "$GH_ISSUES" \
+        --argjson labels "$LABELS_EXIST" \
+        --argjson state "$STATE" \
+        --arg repo "$REPO" \
+        '{
+          gh_issues: $gh_issues,
+          labels: $labels,
+          state: $state,
+          repo: $repo
+        }' > /tmp/gh-aw/agent/pme-context.json
+
+      echo "Context file written: $(wc -c < /tmp/gh-aw/agent/pme-context.json) bytes"
+      echo "  Existing issues: $GH_ISSUE_COUNT"
+      echo "  State entries: $STATE_KEYS"
 
 safe-outputs:
   create-issue:
@@ -288,7 +253,7 @@ timeout-minutes: 10
 
 # PME Triage
 
-You are a PME triage agent. A deterministic pre-step has already fetched all data you need. Your job is to classify, group, and score PMEs, then create GitHub issues for untracked ones.
+You are a PME triage agent. A deterministic pre-step has already fetched GitHub issues, labels, and state. You need to fetch Salesforce data once via `sf-query`, then classify, group, and score PMEs, and create GitHub issues for untracked ones.
 
 > **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments.
 >
@@ -296,26 +261,39 @@ You are a PME triage agent. A deterministic pre-step has already fetched all dat
 >
 > **Safe output timing:** All safe output items (`create-issue`, `add-labels`, `add-comment`, `sf-comment`) are processed **after your session ends**, not during it. You will never be able to see or look up issues you create via safe outputs — they do not exist yet. Do not search for newly created issues to obtain their numbers. Use PME names (not issue numbers) when referencing newly created issues in SF write-back comments.
 
-## Step 1: Read Pre-Computed Context
+## Step 1: Read Pre-Computed Context and Fetch Salesforce Data
+
+### 1a: Read GitHub context
 
 Read `/tmp/gh-aw/agent/pme-context.json`. This file was assembled by the pre-step and contains:
 
 ```json
 {
-  "run_params": { "product_filter": "...", "priority_filter": "...", "lookback_days": 30, "pme_limit": 25, "repo": "owner/repo" },
-  "sf_pmes": { "totalSize": N, "records": [ ... ] },
   "gh_issues": [ { "number": 102, "title": "...", "body": "...", "createdAt": "...", "labels": [...] } ],
   "labels": { "pme-triage": true, "priority:high": true, "enhancement-backlog": false, ... },
-  "state": { "PME-500128": { "status": "tracked", "issue": 102, "sf_writeback": true }, ... }
+  "state": { "PME-500128": { "status": "tracked", "issue": 102, "sf_writeback": true }, ... },
+  "repo": "owner/repo"
 }
 ```
 
-**If the file contains `sf_auth_error`**, Salesforce authentication failed. Create a GitHub issue using the `create-issue` safe output:
+### 1b: Fetch Salesforce PMEs
 
-- **Title:** `[SETUP] Salesforce authentication failed for PME triage`
-- **Body:** Include the error from the context file, instructions to configure `SF_OAUTH_CLIENT_ID` (variable) and `SF_OAUTH_SECRET` (secret) for the Connected App (`pmeautomation@realpage.com`), and a manual test curl command. Then **stop** — do not continue.
+Call `sf-query` with this SOQL query to verify Salesforce connectivity and fetch open PMEs:
 
-**If `sf_pmes.totalSize` is 0**, stop and report: "No open PMEs found."
+```
+SELECT Id, Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${{ inputs.lookback_days }}
+```
+
+**Append these filters if the value is non-empty:**
+- Product filter (`${{ inputs.product_filter }}`): `AND Support_Product_Name__c LIKE '${{ inputs.product_filter }}'`
+- Priority filter (`${{ inputs.priority_filter }}`): `AND Priority__c LIKE '${{ inputs.priority_filter }}'`
+
+**Then append:** `ORDER BY Priority__c ASC, CreatedDate ASC LIMIT ${{ inputs.pme_limit }}`
+
+Inspect the response:
+- If the response contains an `error` or `errorCode`, create a GitHub issue via `create-issue` titled `[SETUP] Salesforce authentication failed for PME triage` with the error details and setup instructions. Then **stop**.
+- If `totalSize` is 0, stop and report: "No open PMEs found."
+- Otherwise, proceed with the records.
 
 ## Step 2: Cross-Reference PMEs Against State and GitHub Issues
 
@@ -325,7 +303,7 @@ For any PME in the state file with `"status": "issue_pending"`, search the `gh_i
 
 ### 2b: Classify fetched PMEs
 
-For each PME in `sf_pmes.records`, check the state file first:
+For each PME in the Salesforce results, check the state file first:
 
 - **In state with `"status": "tracked"`** — already tracked. Check if `LastModifiedDate` is more than 24 hours after the matching issue's `createdAt` to detect staleness.
 - **In state with `"status": "issue_pending"`** — treat as already tracked (do not create a duplicate).
