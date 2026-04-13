@@ -41,7 +41,7 @@ The PME triage agent runs on a schedule (every 6 hours) or manually via `workflo
 
 4. **Classify & Rank** — Groups related untracked PMEs, classifies each group as a **bug** or **enhancement** (P4 feature requests), scores by priority/age/cluster size, and detects **works-as-designed** behavior causing customer pain.
 
-5. **Create Issues** — Creates GitHub issues for untracked PMEs (up to 10 per run). Bug groups get structured details with priority labels. Enhancement groups get a "Product Opportunity" template with demand signals and `enhancement-backlog` label. WAD-flagged groups get an additional "Product Opportunity — Works As Designed" section and `wad:customer-impact` label.
+5. **Create Issues** — Creates GitHub issues for untracked PMEs (up to 5 per run). Bug groups get structured details with priority labels. Enhancement groups get a "Product Opportunity" template with demand signals and `enhancement-backlog` label. WAD-flagged groups get an additional "Product Opportunity — Works As Designed" section and `wad:customer-impact` label.
 
 6. **SF Write-Back** — Posts GitHub issue links back to each PME record in Salesforce via a batched custom safe output job (`sf-comment`). Comments are permanent (FeedItem deletion is disabled org-wide).
 
@@ -76,6 +76,7 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 | Input | Default | Description |
 |-------|---------|-------------|
 | `product_filter` | *(empty — all products)* | SOQL LIKE pattern for `Support_Product_Name__c` (e.g., `%Knock%`) |
+| `priority_filter` | *(empty — all priorities)* | SOQL LIKE pattern for `Priority__c` (e.g., `P4%`) |
 | `pme_limit` | `25` | Max PMEs to fetch from Salesforce per run |
 | `lookback_days` | `30` | How far back to search for open PMEs |
 | `title_prefix` | `PME ` | Prefix for created issue titles |
@@ -83,7 +84,7 @@ The wizard prompts for optional inputs. For scheduled runs, edit your local `.gi
 ## Safety Guardrails
 
 - **Duplicate detection** — Checks for existing open issues with the `pme-triage` label before creating new ones
-- **Capped outputs** — Max 10 issues and 5 comments per run
+- **Capped outputs** — Max 5 issues and 5 comments per run
 - **SF write-back gating** — Salesforce writes go through a custom safe output job (`sf-comment`), not MCP scripts. Comments are batched into a single call and the job only runs if the agent emits items. FeedItem deletion is disabled org-wide — all comments are permanent.
 - **SF write-back dedup** — The agent checks the GitHub issue body for an `SF write-back: done` marker before posting to avoid duplicate Chatter comments on repeated runs
 - **Stale update, not duplicate** — If a PME already has a tracking issue but has been updated in Salesforce, the agent comments on the existing issue rather than creating a duplicate
