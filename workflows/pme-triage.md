@@ -77,7 +77,7 @@ safe-outputs:
   create-issue:
     title-prefix: ${{ inputs.title_prefix }}
     labels: [pme-triage]
-    max: 10
+    max: 5
   add-labels:
     max: 25
     allowed:
@@ -185,6 +185,8 @@ Execute the following pipeline in order. If any step finds zero results, stop ea
 > **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments; always check for existing GitHub-linked comments before writing.
 >
 > **Batching:** Custom safe output jobs can only be called once per run. Collect ALL SF comments throughout the pipeline and call `sf-comment` exactly once at the end of Step 5 with a single `comments_json` array containing every comment to post.
+>
+> **Safe output timing:** All safe output items (`create-issue`, `add-labels`, `add-comment`, `sf-comment`) are processed **after your session ends**, not during it. You will never be able to see or look up issues you create via safe outputs — they do not exist yet. Do not search for newly created issues to obtain their numbers. Use PME names (not issue numbers) when referencing newly created issues in SF write-back comments.
 
 ## Step 0: Salesforce Connectivity Check
 
@@ -531,9 +533,9 @@ If a label does not exist in the repository, **do not attempt to add it**. Inste
 For each PME included in a newly created GitHub issue, add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
-- `comment`: `"GitHub Issue Created: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
+- `comment`: `"GitHub Issue Created: {issue_title}\nRepository: {owner}/{repo}"`
 
-This closes the loop between Salesforce and GitHub — anyone viewing the PME in Salesforce can immediately find the tracking issue.
+Since issue numbers are not available at this point (safe outputs are processed after your session ends), reference the issue by title. The next scheduled run will match the created issue and post the direct link via Step 2b.
 
 ## Step 5: Update Stale Tracking Issues
 
@@ -559,7 +561,7 @@ Please review the [PME in Salesforce](https://realpage.my.salesforce.com/{Id}) f
 After posting the GitHub comment, also add an entry to the SF comments batch:
 
 - `record_id`: the PME's Salesforce `Id`
-- `comment`: `"GitHub Issue #{issue_number} updated with latest Salesforce state."`
+- `comment`: `"GitHub Issue updated with latest Salesforce state.\nRepository: {owner}/{repo}"`
 
 ### Post all SF comments
 
