@@ -31,23 +31,39 @@ flowchart LR
 
 ## How It Works
 
-The PME triage agent runs on a schedule (every 6 hours) or manually via `workflow_dispatch`. A single agent handles the entire pipeline:
+The workflow uses a **deterministic pre-step + agentic classification** architecture. The pre-step handles all external data fetching; the agent focuses on grouping, scoring, and issue creation.
 
-1. **Connectivity Check** — Verifies Salesforce OAuth authentication and access to the `Problem_Management_Escalation__c` object. If authentication fails, creates a setup issue with troubleshooting steps and stops.
+### Pre-Step (deterministic)
 
-2. **Fetch Open PMEs** — Queries Salesforce via SOQL for open PMEs within the lookback window, optionally filtered by product and/or priority. Returns PME details including priority, status, teams, and linked work items.
+Runs as a standard GitHub Actions step before the agent, outside the firewall sandbox:
 
-3. **Cross-Reference via State File** — Reads `pme-state.json` from repo memory (`memory/pme-triage` branch). PMEs already in the state file skip GitHub search entirely. PMEs with `issue_pending` status get backfilled with real issue numbers. Only PMEs not in the state file require a GitHub search. Builds lists of already-tracked, untracked, and stale PMEs. For already-tracked PMEs, posts the GitHub issue link back to the Salesforce PME record as a Chatter comment (deduped via state file and issue body marker).
+1. **Salesforce Auth & Fetch** — Authenticates via OAuth client_credentials and queries Salesforce for open PMEs within the lookback window, filtered by product and/or priority. If authentication fails, writes an error to the context file for the agent to handle.
 
-4. **Classify & Rank** — Groups related untracked PMEs, classifies each group as a **bug** or **enhancement** (P4 feature requests), scores by priority/age/cluster size, and detects **works-as-designed** behavior causing customer pain.
+2. **GitHub Issue Listing** — Lists all open issues with the `pme-triage` label in a single `gh issue list` call.
 
-5. **Create Issues** — Creates GitHub issues for untracked PMEs (up to 5 per run). Bug groups get structured details with priority labels. Enhancement groups get a "Product Opportunity" template with demand signals and `enhancement-backlog` label. WAD-flagged groups get an additional "Product Opportunity — Works As Designed" section and `wad:customer-impact` label.
+3. **Label Check** — Checks which labels exist in the repository so the agent doesn't waste turns on label lookups.
 
-6. **SF Write-Back** — Posts GitHub issue links back to each PME record in Salesforce via a batched custom safe output job (`sf-comment`). Comments are permanent (FeedItem deletion is disabled org-wide).
+4. **State File Load** — Reads `pme-state.json` from the `memory/pme-triage` branch via `git show`.
 
-7. **Update Stale Issues** — Comments on existing tracking issues where the Salesforce PME has been modified since the issue was created, with a corresponding SF write-back.
+5. **Context Assembly** — Writes all data to `/tmp/gh-aw/agent/pme-context.json` for the agent.
 
-8. **Human Follow-up** — Teams review the created issues, assign ownership, and link to implementation work. Product teams review `enhancement-backlog` and `wad:customer-impact` issues separately.
+### Agent (agentic)
+
+Reads the pre-computed context file and handles the judgment-heavy work:
+
+1. **Cross-Reference** — Matches PMEs against the state file and GitHub issues. Builds lists of already-tracked, untracked, and stale PMEs. Backfills `issue_pending` entries from prior runs.
+
+2. **Classify & Rank** — Groups related untracked PMEs, classifies as **bug** or **enhancement**, scores by priority/age/cluster size, and detects **works-as-designed** behavior.
+
+3. **Create Issues** — Creates GitHub issues (up to 5/run) with structured templates. Applies labels where they exist.
+
+4. **SF Write-Back** — Collects Chatter comments for all PMEs (tracked, new, stale) and calls the `sf-comment` safe output job once with the full batch.
+
+5. **State Update** — Writes updated `pme-state.json` to repo memory.
+
+### Human Follow-up
+
+Teams review the created issues, assign ownership, and link to implementation work. Product teams review `enhancement-backlog` and `wad:customer-impact` issues separately.
 
 ## Workflows Used
 
@@ -109,41 +125,15 @@ The workflow uses the following labels if they exist in the consumer repository.
 
 ### Agent timeouts
 
-The agent step has a 10-minute timeout. Runs that create many issues can exceed this because each issue body requires significant LLM output tokens. The pipeline itself (SF fetch, cross-reference, grouping) is fast — typically under 1 minute. Issue creation dominates the time budget.
-
-**Symptoms:** The workflow completes with `conclusion: failure`, but `safe_outputs` succeeds — meaning the agent produced output before the timeout killed it. Created issues may be missing labels or SF write-back comments.
+The agent step has a 10-minute timeout. With the deterministic pre-step handling all data fetching, the agent typically completes in under 3 minutes. Issue creation dominates the time budget when there are many untracked PMEs.
 
 **Mitigations:**
 - Keep `create-issue: max` at 5 or lower. The 6-hour schedule means 4 runs/day × 5 issues = 20 issues/day.
 - Use `priority_filter` and `product_filter` to narrow the PME scope for manual dispatches.
-- Lower `pme_limit` if runs are slow. Repo memory eliminates GitHub searches for known PMEs, but the first run for a new product filter still searches.
 
-**Diagnosing a timeout:**
+**Diagnosing issues:**
 
-1. Run `gh aw audit <run-id>` for a high-level breakdown of turns, tool calls, and token usage.
-2. Parse the agent conversation from the audit logs to identify where time was spent:
-   ```bash
-   # List downloaded audit logs
-   ls .github/aw/logs/
-
-   # Parse the agent conversation timeline
-   python3 -c "
-   import json
-   with open('.github/aw/logs/run-<id>/agent-stdio.log') as f:
-       for line in f:
-           try:
-               e = json.loads(line.strip())
-               ts = e.get('timestamp','')[:19]
-               if e['type'] == 'assistant':
-                   for c in e['message']['content']:
-                       if c['type'] == 'tool_use':
-                           print(f'{ts}  CALL  {c[\"name\"]}')
-               elif e['type'] == 'user' and ts:
-                   print(f'{ts}  RESULT')
-           except: pass
-   "
-   ```
-3. Look for long gaps between a `CALL` and its `RESULT` — that's either a slow MCP tool or slow LLM output generation. A cluster of `create_issue` calls followed by `search_issues` or `list_issues` calls indicates the agent is searching for its own newly created issues (a known anti-pattern addressed by the "safe output timing" prompt note).
+Run `gh aw audit <run-id>` for a breakdown of turns, tool calls, and token usage. The `agentic_fraction` metric shows how much of the run is actual classification vs. data shuffling — it should be high (>0.5) with the pre-step architecture.
 
 ## Repo Memory
 
@@ -158,12 +148,13 @@ The workflow uses gh-aw [repo memory](https://github.github.com/gh-aw/reference/
 ```
 
 **How it works:**
-- On each run, the agent reads the state file and diffs against the fresh Salesforce fetch. PMEs already in the file skip GitHub search entirely.
-- New issues are recorded as `issue_pending`. On the next run, the agent finds the created issue, backfills the real issue number, and posts the SF write-back with a direct link.
+- The deterministic pre-step reads the state file via `git show` from the `memory/pme-triage` branch and includes it in the context file. The agent sees all prior state without making any API calls.
+- The agent diffs state against the fresh Salesforce fetch. PMEs already tracked skip GitHub search entirely.
+- New issues are recorded as `issue_pending`. On the next run, the agent finds the created issue in the pre-loaded GitHub issues list, backfills the real issue number, and posts the SF write-back.
 - The state file is committed and pushed via the `push_repo_memory` safe output at the end of each run.
 
 **Benefits:**
-- Faster cross-referencing — file read instead of O(n) GitHub API searches for known PMEs
+- Faster cross-referencing — state and GitHub issues are pre-loaded, no per-PME API searches
 - Real issue links in SF write-back — backfilled on run N+1 instead of referencing by title only
 - Audit trail — Git history on the memory branch tracks state changes across runs
 

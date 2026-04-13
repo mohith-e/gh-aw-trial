@@ -1,9 +1,10 @@
 ---
 description: |
-  PME triage workflow. Authenticates to Salesforce, fetches open Problem
-  Management Escalations via SOQL, cross-references against GitHub Issues
-  to find untracked PMEs, ranks by priority/age/impact, creates GitHub
-  issues for follow-up, and writes triage results back to Salesforce.
+  PME triage workflow. Pre-step authenticates to Salesforce and fetches open
+  Problem Management Escalations via SOQL, lists existing GitHub tracking issues,
+  and checks label availability — all deterministically. The agent reads the
+  pre-computed context, groups/scores/classifies PMEs, creates GitHub issues for
+  untracked PMEs, and writes triage results back to Salesforce.
   Detects enhancement clusters and works-as-designed customer pain.
 
 on:
@@ -36,7 +37,6 @@ engine: claude
 network:
   allowed:
     - defaults
-    - "realpage.my.salesforce.com"
     # tfs.realpage.com: listed to prevent AWF from redacting TFS URLs in safe
     # outputs (e.g., Azure_DevOps_URL__c links). On GitHub-hosted runners this
     # host is unreachable; on self-hosted runners with VPN access it will also
@@ -45,7 +45,7 @@ network:
 
 tools:
   github:
-    toolsets: [default]
+    toolsets: [issues, repos]
   repo-memory:
     branch-name: memory/pme-triage
     description: "PME tracking state — cross-reference cache and issue-number backfill"
@@ -53,31 +53,138 @@ tools:
     max-file-size: 1048576
     max-file-count: 5
 
-mcp-scripts:
-  sf-query:
-    description: "Authenticate to Salesforce via OAuth client_credentials and execute a SOQL query. Returns results as JSON."
-    inputs:
-      query:
-        type: string
-        required: true
-        description: "The SOQL query to execute"
+steps:
+  - name: Fetch PME context (SF + GitHub + state)
+    env:
+      SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
+      SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      PRODUCT_FILTER: "${{ inputs.product_filter }}"
+      PRIORITY_FILTER: "${{ inputs.priority_filter }}"
+      LOOKBACK_DAYS: "${{ inputs.lookback_days || '30' }}"
+      PME_LIMIT: "${{ inputs.pme_limit || '25' }}"
+      REPO: "${{ github.repository }}"
     run: |
+      set -euo pipefail
+      mkdir -p /tmp/gh-aw/agent
+
+      #──────────────────────────────────────────────
+      # 1. Salesforce authentication
+      #──────────────────────────────────────────────
+      echo "::group::Salesforce authentication"
+      if [ -z "${SF_CLIENT_ID:-}" ] || [ -z "${SF_CLIENT_SECRET:-}" ]; then
+        echo '{"sf_auth_error": "SF_OAUTH_CLIENT_ID or SF_OAUTH_SECRET not configured"}' > /tmp/gh-aw/agent/pme-context.json
+        echo "::error::Salesforce credentials not configured"
+        echo "::endgroup::"
+        exit 0
+      fi
       AUTH=$(curl -s -X POST "https://realpage.my.salesforce.com/services/oauth2/token" \
         -d "grant_type=client_credentials" \
         -d "client_id=$SF_CLIENT_ID" \
         -d "client_secret=$SF_CLIENT_SECRET")
       TOKEN=$(echo "$AUTH" | jq -r '.access_token')
       if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-        echo "$AUTH"
-        exit 1
+        echo "{\"sf_auth_error\": $(echo "$AUTH" | jq -c .)}" > /tmp/gh-aw/agent/pme-context.json
+        echo "::error::Salesforce authentication failed"
+        echo "::endgroup::"
+        exit 0
       fi
-      curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
+      echo "Authenticated to Salesforce successfully."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 2. SOQL query — fetch open PMEs
+      #──────────────────────────────────────────────
+      echo "::group::SOQL query"
+      QUERY="SELECT Id, Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${LOOKBACK_DAYS}"
+      if [ -n "${PRODUCT_FILTER:-}" ]; then
+        QUERY="${QUERY} AND Support_Product_Name__c LIKE '${PRODUCT_FILTER}'"
+      fi
+      if [ -n "${PRIORITY_FILTER:-}" ]; then
+        QUERY="${QUERY} AND Priority__c LIKE '${PRIORITY_FILTER}'"
+      fi
+      QUERY="${QUERY} ORDER BY Priority__c ASC, CreatedDate ASC LIMIT ${PME_LIMIT}"
+      echo "Query: $QUERY"
+      SF_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
         -H "Authorization: Bearer $TOKEN" \
-        --data-urlencode "q=$INPUT_QUERY"
-    env:
-      SF_CLIENT_ID: "${{ vars.SF_OAUTH_CLIENT_ID }}"
-      SF_CLIENT_SECRET: "${{ secrets.SF_OAUTH_SECRET }}"
-    timeout: 30
+        --data-urlencode "q=$QUERY")
+      PME_COUNT=$(echo "$SF_RESULT" | jq '.totalSize // 0')
+      echo "Fetched $PME_COUNT PME(s) from Salesforce."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 3. GitHub issues with pme-triage label
+      #──────────────────────────────────────────────
+      echo "::group::GitHub issues"
+      GH_ISSUES=$(gh issue list --repo "$REPO" --label pme-triage --state open --limit 200 \
+        --json number,title,body,createdAt,labels 2>/dev/null || echo '[]')
+      GH_ISSUE_COUNT=$(echo "$GH_ISSUES" | jq 'length')
+      echo "Found $GH_ISSUE_COUNT existing pme-triage issue(s)."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 4. Label existence check
+      #──────────────────────────────────────────────
+      echo "::group::Label check"
+      LABELS_TO_CHECK='["pme-triage","priority:critical","priority:high","priority:medium","priority:low","enhancement-backlog","wad:customer-impact"]'
+      LABELS_EXIST='{}' 
+      for LABEL in $(echo "$LABELS_TO_CHECK" | jq -r '.[]'); do
+        if gh label list --repo "$REPO" --search "$LABEL" --limit 1 --json name 2>/dev/null | jq -e --arg l "$LABEL" 'any(.[]; .name == $l)' > /dev/null 2>&1; then
+          LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): true}')
+        else
+          LABELS_EXIST=$(echo "$LABELS_EXIST" | jq --arg l "$LABEL" '. + {($l): false}')
+        fi
+      done
+      echo "Labels: $LABELS_EXIST"
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 5. State file from repo-memory
+      #──────────────────────────────────────────────
+      echo "::group::State file"
+      STATE='{}'
+      if git ls-remote --heads origin memory/pme-triage | grep -q memory/pme-triage; then
+        git fetch origin memory/pme-triage --depth=1 2>/dev/null || true
+        STATE_CONTENT=$(git show FETCH_HEAD:memory/pme-triage/pme-state.json 2>/dev/null || echo '{}')
+        if echo "$STATE_CONTENT" | jq . > /dev/null 2>&1; then
+          STATE="$STATE_CONTENT"
+        fi
+      fi
+      STATE_KEYS=$(echo "$STATE" | jq 'keys | length')
+      echo "Loaded state file with $STATE_KEYS tracked PME(s)."
+      echo "::endgroup::"
+
+      #──────────────────────────────────────────────
+      # 6. Assemble context file
+      #──────────────────────────────────────────────
+      jq -n \
+        --argjson sf_pmes "$SF_RESULT" \
+        --argjson gh_issues "$GH_ISSUES" \
+        --argjson labels "$LABELS_EXIST" \
+        --argjson state "$STATE" \
+        --arg product_filter "${PRODUCT_FILTER:-}" \
+        --arg priority_filter "${PRIORITY_FILTER:-}" \
+        --arg lookback_days "$LOOKBACK_DAYS" \
+        --arg pme_limit "$PME_LIMIT" \
+        --arg repo "$REPO" \
+        '{
+          run_params: {
+            product_filter: $product_filter,
+            priority_filter: $priority_filter,
+            lookback_days: ($lookback_days | tonumber),
+            pme_limit: ($pme_limit | tonumber),
+            repo: $repo
+          },
+          sf_pmes: $sf_pmes,
+          gh_issues: $gh_issues,
+          labels: $labels,
+          state: $state
+        }' > /tmp/gh-aw/agent/pme-context.json
+
+      echo "Context file written: $(wc -c < /tmp/gh-aw/agent/pme-context.json) bytes"
+      echo "  PMEs from SF: $PME_COUNT"
+      echo "  Existing issues: $GH_ISSUE_COUNT"
+      echo "  State entries: $STATE_KEYS"
 
 safe-outputs:
   create-issue:
@@ -182,343 +289,165 @@ timeout-minutes: 10
 
 # PME Triage
 
-You are a PME triage agent. Your job is to fetch open Problem Management Escalations (PMEs) from Salesforce, cross-reference them against this repository's GitHub Issues, and create tracking issues for any PMEs that are not yet being tracked.
+You are a PME triage agent. A deterministic pre-step has already fetched all data you need. Your job is to classify, group, and score PMEs, then create GitHub issues for untracked ones.
 
-Execute the following pipeline in order. If any step finds zero results, stop early and report.
-
-> **Note:** The field API names for `Problem_Management_Escalation__c` below were validated against the production Salesforce org on 2026-04-12.
-
-> **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments; always check for existing GitHub-linked comments before writing.
+> **Write constraint — Salesforce comments:** The `sf-comment` safe output job posts permanent Chatter comments to Salesforce records. FeedItem deletion is disabled org-wide — every comment is permanent and visible to all PME stakeholders. Keep comments concise and factual. Do not post duplicate comments.
 >
-> **Batching:** Custom safe output jobs can only be called once per run. Collect ALL SF comments throughout the pipeline and call `sf-comment` exactly once at the end of Step 5 with a single `comments_json` array containing every comment to post.
+> **Batching:** Custom safe output jobs can only be called once per run. Collect ALL SF comments throughout the pipeline and call `sf-comment` exactly once at the end with a single `comments_json` array containing every comment to post.
 >
 > **Safe output timing:** All safe output items (`create-issue`, `add-labels`, `add-comment`, `sf-comment`) are processed **after your session ends**, not during it. You will never be able to see or look up issues you create via safe outputs — they do not exist yet. Do not search for newly created issues to obtain their numbers. Use PME names (not issue numbers) when referencing newly created issues in SF write-back comments.
 
-## Step 0: Salesforce Connectivity Check
+## Step 1: Read Pre-Computed Context
 
-Before querying for PMEs, verify that Salesforce authentication and the PME object are accessible.
-
-Call `sf-query` with this query:
-
-```
-SELECT Id FROM Problem_Management_Escalation__c LIMIT 1
-```
-
-Inspect the response:
-
-- If the response contains a `records` array (even if empty), authentication is working and the object exists. Proceed to Step 1.
-- If the response contains an `error` or `errorCode` field, Salesforce is not accessible. Create a GitHub issue using the `create-issue` safe output with the following content, then **stop the pipeline** — do not continue to Step 1.
-
-**Title:** `[SETUP] Salesforce authentication failed for PME triage`
-
-**Body:**
-
-````markdown
-## Action Required — Configure Salesforce OAuth Credentials
-
-The PME triage workflow could not authenticate to Salesforce. This usually means the OAuth client credentials are missing or misconfigured.
-
-### Error Response
-
-{paste the full error response JSON here}
-
-### Steps to Fix
-
-1. Ensure the following secrets are configured in this repository's GitHub Actions settings:
-   - `SF_OAUTH_CLIENT_ID` (variable) — the Connected App client ID for `pmeautomation@realpage.com`
-   - `SF_OAUTH_SECRET` (secret) — the corresponding client secret
-
-2. Verify the Connected App in Salesforce:
-   - The app must have the `client_credentials` OAuth flow enabled
-   - The running user must be `pmeautomation@realpage.com`
-   - The app must have access to the `Problem_Management_Escalation__c` object
-
-3. Test authentication manually:
-   ```bash
-   curl -s -X POST "https://realpage.my.salesforce.com/services/oauth2/token" \
-     -d "grant_type=client_credentials" \
-     -d "client_id=$SF_OAUTH_CLIENT_ID" \
-     -d "client_secret=$SF_OAUTH_SECRET"
-   ```
-
-### After Fixing
-
-Close this issue and re-run the PME triage workflow. It will detect successful authentication and proceed normally.
-````
-
-Add the labels `pme-triage` to this issue using the `add-labels` safe output.
-
-## Step 1: Fetch Open PMEs
-
-Construct a SOQL query to fetch open PMEs from the last ${{ inputs.lookback_days }} days. Build the query by starting with the base WHERE clause and appending any active filters:
-
-**Base query:**
-```
-SELECT Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate
-FROM Problem_Management_Escalation__c
-WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved')
-  AND CreatedDate >= LAST_N_DAYS:${{ inputs.lookback_days }}
-```
-
-**Active filters — append these to the WHERE clause if the value is non-empty:**
-- Product filter (`${{ inputs.product_filter }}`): `AND Support_Product_Name__c LIKE '${{ inputs.product_filter }}'`
-- Priority filter (`${{ inputs.priority_filter }}`): `AND Priority__c LIKE '${{ inputs.priority_filter }}'`
-
-**Then append the ORDER BY and LIMIT:**
-```
-ORDER BY Priority__c ASC, CreatedDate ASC
-LIMIT ${{ inputs.pme_limit }}
-```
-
-Call `sf-query` with the assembled query.
-
-After retrieving results:
-
-- If the `records` array is empty or `totalSize` is 0, stop and report: "No open PMEs found in the last ${{ inputs.lookback_days }} days."
-- Otherwise, note the total count and proceed.
-
-## Step 2: Cross-Reference Against State File and GitHub Issues
-
-### 2a: Load state file
-
-Read `/tmp/gh-aw/repo-memory/default/pme-state.json` from repo memory. If the file does not exist (first run), start with an empty object `{}`.
-
-The state file maps PME names to their tracking status:
+Read `/tmp/gh-aw/agent/pme-context.json`. This file was assembled by the pre-step and contains:
 
 ```json
 {
-  "PME-493502": {"status": "tracked", "issue": 135, "sf_writeback": true},
-  "PME-497398": {"status": "issue_pending", "title": "[Enhancement] AIM: ..."},
-  "PME-500128": {"status": "tracked", "issue": 102, "sf_writeback": false}
+  "run_params": { "product_filter": "...", "priority_filter": "...", "lookback_days": 30, "pme_limit": 25, "repo": "owner/repo" },
+  "sf_pmes": { "totalSize": N, "records": [ ... ] },
+  "gh_issues": [ { "number": 102, "title": "...", "body": "...", "createdAt": "...", "labels": [...] } ],
+  "labels": { "pme-triage": true, "priority:high": true, "enhancement-backlog": false, ... },
+  "state": { "PME-500128": { "status": "tracked", "issue": 102, "sf_writeback": true }, ... }
 }
 ```
 
-### 2b: Backfill pending issues
+**If the file contains `sf_auth_error`**, Salesforce authentication failed. Create a GitHub issue using the `create-issue` safe output:
 
-For any PME in the state file with `"status": "issue_pending"`, search GitHub Issues for an open issue with the `pme-triage` label whose title contains the PME `Name`. If found, update the state entry to `"status": "tracked"` with the issue number. If not found, leave as `"issue_pending"` — it may still be processing.
+- **Title:** `[SETUP] Salesforce authentication failed for PME triage`
+- **Body:** Include the error from the context file, instructions to configure `SF_OAUTH_CLIENT_ID` (variable) and `SF_OAUTH_SECRET` (secret) for the Connected App (`pmeautomation@realpage.com`), and a manual test curl command. Then **stop** — do not continue.
 
-### 2c: Classify fetched PMEs
+**If `sf_pmes.totalSize` is 0**, stop and report: "No open PMEs found."
 
-For each PME returned from Salesforce in Step 1, check the state file first:
+## Step 2: Cross-Reference PMEs Against State and GitHub Issues
 
-- **In state file with `"status": "tracked"`** — already tracked. Check if the PME's `LastModifiedDate` is more than 24 hours after the issue was created to detect staleness.
-- **In state file with `"status": "issue_pending"`** — issue creation was submitted on a prior run but not yet confirmed. Treat as already tracked (do not create a duplicate).
-- **Not in state file** — search GitHub Issues for an open issue with the `pme-triage` label containing the PME `Name` in the title or body. If found, add to the state file as `"tracked"`. If not found, classify as untracked.
+### 2a: Backfill pending issues
 
-Build three lists:
+For any PME in the state file with `"status": "issue_pending"`, search the `gh_issues` array for an open issue whose title contains the PME `Name`. If found, update the state entry to `"status": "tracked"` with the issue number. If not found, leave as `"issue_pending"`.
 
-1. **Already tracked** — PMEs with a matching issue that is up to date
-2. **Untracked** — PMEs with no matching issue
-3. **Stale** — PMEs with a matching issue where `LastModifiedDate` is more than 24 hours after issue creation
+### 2b: Classify fetched PMEs
+
+For each PME in `sf_pmes.records`, check the state file first:
+
+- **In state with `"status": "tracked"`** — already tracked. Check if `LastModifiedDate` is more than 24 hours after the matching issue's `createdAt` to detect staleness.
+- **In state with `"status": "issue_pending"`** — treat as already tracked (do not create a duplicate).
+- **Not in state** — search `gh_issues` for an issue whose title or body contains the PME `Name`. If found, add to state as `"tracked"`. If not found, classify as **untracked**.
+
+Build three lists: **already tracked**, **untracked**, **stale**.
 
 If all PMEs are already tracked and none are stale, save the state file and stop: "All $N PMEs are already tracked. No action needed."
 
-### 2d: Write back issue links to Salesforce
+### 2c: Write back issue links to Salesforce
 
-For each PME in the **already tracked** list where the state file has `"sf_writeback": false` (or the field is missing), post the GitHub issue link back to the PME record in Salesforce.
-
-To avoid duplicate comments, also check whether the GitHub issue body contains the string `SF write-back: done`. If present, set `"sf_writeback": true` in the state file and skip.
-
-If not yet written back, add an entry to the SF comments batch:
-
+For each PME in the **already tracked** list where the state has `"sf_writeback": false` (or missing), check whether the matching GitHub issue body contains `SF write-back: done`. If present, set `"sf_writeback": true` and skip. Otherwise, add an SF comment entry:
 - `record_id`: the PME's Salesforce `Id`
-- `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{owner}/{repo}/issues/{issue_number}"`
+- `comment`: `"GitHub Tracking: #{issue_number} — {issue_title}\nhttps://github.com/{repo}/issues/{issue_number}"`
 
 Then set `"sf_writeback": true` in the state entry.
-
-> **Note:** FeedItem cannot be queried by ParentId via SOQL (Salesforce platform restriction). Use the GitHub issue body and the state file as dedup sources, not Salesforce.
 
 ## Step 3: Group and Rank Untracked PMEs
 
 ### 3a: Group related PMEs
 
-Analyze the untracked PMEs and group ones that likely refer to the same underlying issue. Compare `Summary__c`, `Description__c`, `Impacted_Products__c`, and `Accountable_Team__c` across the untracked set. PMEs should be grouped together when they share:
+Group untracked PMEs that likely refer to the same underlying issue by comparing `Summary__c`, `Description__c`, `Impacted_Products__c`, and `Accountable_Team__c`. When in doubt, do **not** group.
 
-- Substantially similar summaries or descriptions (e.g., same error message, same symptom described differently)
-- The same impacted product AND similar symptoms
-- Explicit cross-references to each other
+Classify each group:
+- **Enhancement group**: ALL PMEs have `Priority__c` starting with `P4` AND descriptions indicate feature requests (signals: "would be nice", "feature request", "enhancement", "ability to", "support for", "option to").
+- **Bug group**: Any group with P1–P3 priority, or descriptions clearly describe defects. When in doubt, classify as bug.
 
-PMEs that are clearly distinct problems should remain as singleton groups. When in doubt, do **not** group — it is better to create separate issues than to conflate unrelated problems.
-
-After grouping, classify each group as either a **bug group** or an **enhancement group**:
-
-- **Enhancement group**: ALL PMEs in the group have `Priority__c` starting with `P4` (e.g., `P4 - Enhancement`, `P4 - Feature Request`), AND the summaries/descriptions indicate a feature request, improvement suggestion, or enhancement rather than a defect. Common signals: "would be nice", "feature request", "enhancement", "ability to", "support for", "option to".
-- **Bug group**: Any group that contains at least one PME with priority P1–P3, OR where the descriptions clearly describe a defect, error, or regression — even if all PMEs are P4.
-
-When in doubt, classify as a bug group. It is better to over-surface a potential bug than to bury it in the enhancement backlog.
-
-For enhancement groups, perform an additional clustering step: look across all enhancement groups for clusters that share the same product area (`Impacted_Products__c`) or accountable team (`Accountable_Team__c`). Merge enhancement groups that target the same product area into larger "enhancement opportunity" groups. Bug groups should NOT be merged in this step — only enhancement groups.
+For enhancement groups, merge clusters sharing the same `Impacted_Products__c` or `Accountable_Team__c`.
 
 ### 3b: Score each group
 
-Score each group using this formula:
+**Bug score** = `priority_weight × (1 + age_days / 30) × (1 + 0.25 × (group_size - 1))`
 
-**Score = priority_weight × (1 + age_days / 30) × (1 + 0.25 × (group_size - 1))**
+Priority weights: P1=4, P2=3, P3=2, P4=1, null/unknown=2.
 
-Where:
-- `priority_weight` based on the highest `Priority__c` prefix in the group:
-  - `P1` = 4 (e.g., `P1 - Critical`)
-  - `P2` = 3 (e.g., `P2 - Critical`, `P2 - High`)
-  - `P3` = 2 (e.g., `P3 - Medium`, `P3 - Major`)
-  - `P4` = 1 (e.g., `P4 - Enhancement`, `P4 - Feature Request`)
-  - `null` or unrecognized = 2 (default to medium)
-- `age_days`: days since the oldest `CreatedDate` in the group
-- `group_size`: number of PMEs in the group (groups with more PMEs score higher, indicating a wider-impact issue)
+**Enhancement score** = `cluster_size × (1 + age_days / 60) × product_area_weight`
 
-Sort bug groups by score descending (highest score = most urgent).
+Where `product_area_weight` = 1.5 if all PMEs share the same `Impacted_Products__c`, else 1.0.
 
-For **enhancement groups**, use a modified scoring formula:
-
-**Enhancement Score = cluster_size × (1 + age_days / 60) × product_area_weight**
-
-Where:
-- `cluster_size`: number of PMEs in the enhancement group (dominant factor — more requests = more demand)
-- `age_days`: days since the oldest `CreatedDate` in the group
-- `product_area_weight`: 1.5 if all PMEs share the same `Impacted_Products__c` (focused demand), 1.0 otherwise
-
-Sort enhancement groups separately by enhancement score descending.
-
-Output the grouped and ranked list as a table before proceeding. List all bug groups first, then all enhancement groups, with a separator row:
+Output a ranked table before proceeding:
 
 ```markdown
-| Rank | Type | Group | PME Names | Priority | Oldest (days) | Size | Score | Summary |
-|------|------|-------|-----------|----------|---------------|------|-------|---------|
+| Rank | Type | PME Names | Priority | Age (days) | Size | Score | Summary |
 ```
 
 ### 3c: WAD (Works As Designed) detection
 
-Before creating issues, analyze each group (both bug and enhancement) for "works as designed" signals — behavior that is technically correct per the system's design but causes customer pain.
+Check each group for WAD signals: "works as designed", "by design", "expected behavior", "not a bug", "confusing", "unintuitive" — or when support confirmed behavior is correct but customer is still impacted.
 
-**WAD signals** (one or more indicates possible WAD):
-- The description mentions the system is "working as expected" or "by design" but the behavior causes customer frustration or confusion
-- The description references documentation or help text that confirms the current behavior
-- The escalation was filed because the customer expected different behavior, not because of an error or crash
-- Keywords: "works as designed", "by design", "expected behavior", "not a bug", "confusing", "unintuitive", "misleading"
-- The PME status or notes indicate that support confirmed the behavior is correct but the customer is still impacted
-- The `Priority__c` is P3 or P4 and the description focuses on user experience or workflow friction rather than a technical defect
-
-**WAD classification:**
-- If a group has strong WAD signals AND the behavior causes measurable customer impact (repeated escalations, customer churn risk, workflow blockers), flag it as `wad: true`.
-- If a group has WAD signals but the impact is low or cosmetic, note it but do not flag it.
-- If in doubt, do NOT flag as WAD — it is better to treat something as a bug than to dismiss customer pain.
-
-For each WAD-flagged group, record:
-- **WAD behavior**: what the system does (correctly, per its design)
-- **Customer expectation**: what the customer expected instead
-- **Impact**: why this matters (frequency, severity, workaround difficulty)
+Flag as `wad: true` only when there are strong WAD signals AND measurable customer impact. Record the current behavior, customer expectation, and impact.
 
 ## Step 4: Create GitHub Issues
 
-For each group of untracked PMEs (up to 10 issues), create **one GitHub issue per group** using the `create-issue` safe output. Use the bug group template for bug groups and the enhancement group template for enhancement groups.
+For each group of untracked PMEs, create **one issue per group** using `create-issue`.
 
-### Single-PME bug groups
+### Title formats
 
-**Title format:** `[{Priority__c}] {Name}: {Summary__c}`
+- **Single-PME bug:** `[{Priority__c}] {Name}: {Summary__c}` (first 80 chars of summary)
+- **Multi-PME bug:** `[{highest Priority}] {Name1}, {Name2}: {common summary}`
+- **Enhancement:** `[Enhancement] {product_area}: {common theme} ({N} PMEs)`
 
-Use the first 80 characters of `Summary__c` if it is longer.
-
-### Multi-PME bug groups
-
-**Title format:** `[{highest Priority__c}] {Name1}, {Name2}, ...: {common summary}`
-
-Where `{common summary}` is a brief description of the shared symptom or root cause (not a concatenation of all summaries). Use the first 80 characters.
-
-**Body template (for bug group issues):**
+### Bug issue body
 
 ```markdown
 ## Summary
-
-{For single-PME groups: Summary__c — full text}
-{For multi-PME groups: description of the common issue, noting how many PMEs are grouped and why}
+{Summary__c or description of common issue for multi-PME groups}
 
 ## PMEs in this Issue
-
-{For each PME in the group, include a row in the table below}
-
 | PME ID | Priority | Status | Created | Age | SF Link |
 |--------|----------|--------|---------|-----|---------|
-| {Name} | {Priority__c} | {Escalation_Status__c} | {CreatedDate} | {age_days} days | [View](https://realpage.my.salesforce.com/{Id}) |
+| {Name} | {Priority__c} | {Escalation_Status__c} | {CreatedDate} | {age} days | [View](https://realpage.my.salesforce.com/{Id}) |
 
 ## Details
-
-{For single-PME groups: the PME's Description__c, or "No description provided." if empty}
-{For multi-PME groups: include each PME's description under a sub-heading}
-
-### {Name}: {Summary__c}
-
-{Description__c}
+{Description__c, or per-PME sub-headings for multi-PME groups}
 
 ## Existing Work Items
-
-{For each PME with Azure_DevOps_ID__c populated: "- {Name}: TFS [{Azure_DevOps_ID__c}]({Azure_DevOps_URL__c})"}
-{If no PMEs have work items: "No existing TFS work items linked in Salesforce."}
+{TFS links from Azure_DevOps_ID__c/Azure_DevOps_URL__c, or "No existing TFS work items linked."}
 
 ## Triage
-
 | Field | Value |
 |-------|-------|
-| **Accountable Team** | {Accountable_Team__c — from highest-priority PME, or most common across group} |
+| **Accountable Team** | {Accountable_Team__c} |
 | **Responsible Team** | {Responsible_Team__c} |
-| **Impacted Products** | {union of Impacted_Products__c across group} |
+| **Impacted Products** | {Impacted_Products__c} |
 | **Group Score** | {score} |
 
 ## Next Steps
-
 - [ ] Review PME details and confirm priority
 - [ ] Assign to the appropriate team
 - [ ] Link to implementation issue or PR once work begins
 - [ ] Close this issue when the PME(s) are resolved in Salesforce
 ```
 
-### Enhancement group issues
-
-For groups classified as `enhancement`, use a different title and body template.
-
-**Title format:** `[Enhancement] {product_area}: {common theme} ({N} PMEs)`
-
-Where `{product_area}` is the shared `Impacted_Products__c` (or "Multiple Products" if mixed), and `{common theme}` is a brief description of the enhancement area (first 80 characters).
-
-**Body template for enhancement groups:**
+### Enhancement issue body
 
 ```markdown
 ## Enhancement Opportunity
+{Description of the common enhancement theme}
 
-{Description of the common enhancement theme across the grouped PMEs. What capability are customers requesting? What product area does this affect?}
-
-**Cluster size:** {N} PMEs requesting similar functionality
-**Product area:** {Impacted_Products__c}
-**Demand signal:** {N} independent escalations over {age_range} days
+**Cluster size:** {N} PMEs | **Product area:** {Impacted_Products__c} | **Demand signal:** {N} escalations over {age_range} days
 
 ## PMEs in this Enhancement Cluster
-
 | PME ID | Summary | Created | Age | SF Link |
 |--------|---------|---------|-----|---------|
-| {Name} | {Summary__c} | {CreatedDate} | {age_days} days | [View](https://realpage.my.salesforce.com/{Id}) |
 
 ## Individual Requests
-
-{For each PME, include their specific request under a sub-heading}
-
-### {Name}: {Summary__c}
-
-{Description__c}
+{Per-PME sub-headings with Description__c}
 
 ## Existing Work Items
-
-{Same as bug template}
+{TFS links or "No existing TFS work items linked."}
 
 ## Product Review
-
 | Field | Value |
 |-------|-------|
 | **Accountable Team** | {Accountable_Team__c} |
-| **Impacted Products** | {union of Impacted_Products__c} |
+| **Impacted Products** | {Impacted_Products__c} |
 | **Enhancement Score** | {score} |
 | **Cluster Size** | {N} PMEs |
 | **Oldest Request** | {oldest CreatedDate} ({age} days ago) |
 
 ## Next Steps
-
 - [ ] Review enhancement requests and assess product fit
 - [ ] Prioritize against current roadmap
 - [ ] If accepted, create implementation stories
@@ -526,71 +455,53 @@ Where `{product_area}` is the shared `Impacted_Products__c` (or "Multiple Produc
 - [ ] Close this issue when a decision is made
 ```
 
-Apply the `enhancement-backlog` label (in addition to `pme-triage`) to enhancement group issues using the `add-labels` safe output, if the label exists in the repository. If it does not exist, prepend `[Enhancement]` to the issue title instead. Do **not** apply a `priority:*` label to enhancement group issues — the priority is implicitly low (P4) and the demand signal (cluster size) is the relevant metric.
-
 ### WAD-flagged issues
 
-For any group (bug or enhancement) flagged as `wad: true` in Step 3c, add a **Product Opportunity** section to the issue body. Insert it between the "Details" / "Individual Requests" section and the "Existing Work Items" section:
+For any `wad: true` group, insert this section between "Details"/"Individual Requests" and "Existing Work Items":
 
 ```markdown
 ## Product Opportunity — Works As Designed
-
 > **This behavior appears to be working as designed, but is causing customer pain.**
 
 | Aspect | Description |
 |--------|-------------|
-| **Current behavior** | {what the system does correctly per its design} |
-| **Customer expectation** | {what customers expect instead} |
-| **Impact** | {why this matters — frequency, workaround difficulty, customer sentiment} |
-
-This PME may not represent a bug in the traditional sense, but the gap between designed behavior and customer expectation represents a product improvement opportunity.
+| **Current behavior** | {what the system does} |
+| **Customer expectation** | {what customers expect} |
+| **Impact** | {frequency, workaround difficulty, sentiment} |
 ```
 
-Apply the `wad:customer-impact` label to these issues using the `add-labels` safe output, if the label exists in the repository. If it does not exist, prepend `[WAD]` to the issue title instead. This label can coexist with other labels (`pme-triage`, `priority:*`, `enhancement-backlog`).
+### Labels
 
-### Apply Labels (if available)
+Use the `labels` object from the context file to know which labels exist. Only apply labels that exist.
 
-Before applying labels, check whether each label exists in this repository by searching for it. Only apply labels that already exist.
+- Bug issues: apply `priority:{level}` label (P1→critical, P2→high, P3→medium, P4→low)
+- Enhancement issues: apply `enhancement-backlog` label (no priority label)
+- WAD issues: apply `wad:customer-impact` label
 
-Attempt to add the following labels to each created issue using the `add-labels` safe output:
+If a label does not exist, append it to the title instead: `[priority:high]`.
 
-- `pme-triage`
-- `priority:{level}` based on the highest `Priority__c` prefix in the group: `P1` → `priority:critical`, `P2` → `priority:high`, `P3` → `priority:medium`, `P4` → `priority:low`. If all `Priority__c` values are null or unrecognized, use `priority:medium`.
+### SF write-back for new issues
 
-If a label does not exist in the repository, **do not attempt to add it**. Instead, append the priority level to the issue title as a suffix: `[priority:high]`. For example:
-
-- Label exists: title is `PME [P2 - High] PME-500128: ...` with `priority:high` label applied
-- Label missing: title is `PME [P2 - High] PME-500128: ... [priority:high]`
-
-### Post issue link back to Salesforce
-
-For each PME included in a newly created GitHub issue, add an entry to the SF comments batch:
-
+For each PME in a newly created issue, add an entry to the SF comments batch:
 - `record_id`: the PME's Salesforce `Id`
-- `comment`: `"GitHub Issue Created: {issue_title}\nRepository: {owner}/{repo}"`
+- `comment`: `"GitHub Issue Created: {issue_title}\nRepository: {repo}"`
 
-Since issue numbers are not available at this point (safe outputs are processed after your session ends), reference the issue by title. The next scheduled run will backfill the issue number via Step 2b.
+Issue numbers are not available (safe outputs process after your session), so reference by title. The next run backfills via Step 2a.
 
 ### Update state file
 
-For each PME included in a newly created issue, add or update its entry in the state file:
-
+For each PME in a new issue, add to state:
 ```json
 {"status": "issue_pending", "title": "{issue_title}", "sf_writeback": false}
 ```
 
-The next run's Step 2b will backfill the issue number once the safe output has been processed.
-
 ## Step 5: Update Stale Tracking Issues
 
-For each PME in the **stale** list (from Step 2), add a comment to the existing GitHub issue using the `add-comment` safe output:
+For each **stale** PME, add a comment to its existing issue using `add-comment`:
 
 ```markdown
 ## PME Updated in Salesforce
-
-This PME was last modified on **{LastModifiedDate}**, which is after this tracking issue was created.
-
-### Current Salesforce State
+This PME was last modified on **{LastModifiedDate}**, after this tracking issue was created.
 
 | Field | Value |
 |-------|-------|
@@ -599,45 +510,31 @@ This PME was last modified on **{LastModifiedDate}**, which is after this tracki
 | **Accountable Team** | {Accountable_Team__c} |
 | **Last Modified** | {LastModifiedDate} |
 
-Please review the [PME in Salesforce](https://realpage.my.salesforce.com/{Id}) for the latest details.
+Please review the [PME in Salesforce](https://realpage.my.salesforce.com/{Id}).
 ```
 
-After posting the GitHub comment, also add an entry to the SF comments batch:
+Also add an SF comment entry: `"GitHub Issue updated with latest Salesforce state.\nRepository: {repo}"`
 
-- `record_id`: the PME's Salesforce `Id`
-- `comment`: `"GitHub Issue updated with latest Salesforce state.\nRepository: {owner}/{repo}"`
+## Step 6: Finalize
 
 ### Post all SF comments
 
-After completing Steps 2b, 4, and 5, call the `sf-comment` safe output job exactly **once** with all collected comments:
-
-- `comments_json`: a JSON array of `{"record_id": "...", "comment": "..."}` objects
-
-If no comments were collected (e.g., all PMEs already had write-back markers), skip this call.
+Call `sf-comment` exactly **once** with all collected comments as a `comments_json` array. Skip if no comments were collected.
 
 ### Save state file
 
-Write the updated state file to `/tmp/gh-aw/repo-memory/default/pme-state.json`. Include all PMEs processed during this run — both newly added entries and updated existing entries. Then call the `push_repo_memory` safe output to commit and push the state file to the `memory/pme-triage` branch.
+Write the updated state to `/tmp/gh-aw/repo-memory/default/pme-state.json`. Then call `push_repo_memory`.
 
-## Final Summary
+### Summary
 
-After completing all steps, output a summary table:
+Output a summary table:
 
 ```markdown
 ## PME Triage Run Summary
+**Run parameters:** product_filter=`{filter}`, priority_filter=`{filter}`, lookback_days={N}, pme_limit={N}
 
-**Run parameters:** product_filter=`${{ inputs.product_filter }}`, priority_filter=`${{ inputs.priority_filter }}`, lookback_days=${{ inputs.lookback_days }}, pme_limit=${{ inputs.pme_limit }}
-
-| # | PME Name(s) | Type | WAD | Group | Priority | Age | Action | SF Write-Back | Issue |
-|---|-------------|------|-----|-------|----------|-----|--------|---------------|-------|
-| 1 | {Name} | Bug / Enhancement | — / WAD | — / Group A | {Priority__c} | {age} days | Created / Already tracked / Stale | ✓ / — | #N |
+| # | PME Name(s) | Type | WAD | Priority | Age | Action | SF Write-Back | Issue |
+|---|-------------|------|-----|----------|-----|--------|---------------|-------|
 ```
 
-**Totals:**
-- PMEs fetched from Salesforce: {count}
-- Already tracked: {count} ({count} with SF write-back)
-- Bug groups created: {count} issues ({count} PMEs)
-- Enhancement groups created: {count} issues ({count} PMEs)
-- WAD-flagged issues: {count}
-- Stale issues updated: {count}
-- SF comments posted: {count}
+**Totals:** PMEs fetched, already tracked, bug groups created, enhancement groups created, WAD-flagged, stale updated, SF comments posted.
