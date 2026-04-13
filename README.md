@@ -4,7 +4,7 @@
 
 This is RealPage's library of ready-made [GitHub Agentic Workflows](https://github.github.com/gh-aw/). They're pre-built AI agents that live in your repo as GitHub Actions and fire when you label an issue or PR. No Python glue, no laptop scripts, no MCP servers to host. You `gh aw add` a workflow and you're done.
 
-If you've been hand-rolling agents with the Claude API on your laptop, this is where that work becomes shared infrastructure.
+If you've been hand-rolling agents on your laptop, this is where that work becomes shared infrastructure.
 
 ---
 
