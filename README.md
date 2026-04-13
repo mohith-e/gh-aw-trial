@@ -27,7 +27,7 @@ gh aw add-wizard RealPage/agentics/workflows/agent-review-pr.md@v0.3.0
 gh aw add RealPage/agentics/workflows/agent-review-pr.md@v0.3.0
 ```
 
-> **Safety note:** `add-wizard` pushes a commit to your **current branch** and opens a PR from it. Always run it from a clean `main` checkout, and ensure branch protection is enabled. If you prefer not to push directly, use `gh aw add` instead — it generates the files locally and you decide when and where to commit. For repos with the gh-aw dispatcher agent already set up (`.github/agents/agentic-workflows.agent.md`), you can also ask the agent directly in Claude Code or Copilot to install the workflow — no CLI command needed.
+> **Caution:** `add-wizard` has been observed to push commits directly to the current branch on repos without branch protection. Run it from a feature branch or ensure branch protection is enabled. Use `gh aw add` for a non-interactive alternative that generates files locally without pushing. For repos with the gh-aw dispatcher agent already set up (`.github/agents/agentic-workflows.agent.md`), you can also ask the agent directly in Claude Code or Copilot to install the workflow — no CLI command needed.
 
 Merge the PR the wizard opens. Then open any pull request. Within a minute or two you'll see inline comments on specific lines plus a summary review with 1-5 scores across **correctness**, **security**, and **repo patterns**. It never requests changes; humans still decide whether to merge.
 
