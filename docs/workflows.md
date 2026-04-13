@@ -27,6 +27,7 @@ These are end-to-end workflows that chain multiple agents together:
 | [fortify-fix](../workflows/fortify-fix.md) | Issue labeled `fortify-fix` | Reads the vulnerability issue, fixes the code, opens a focused PR linked to the issue |
 | [implement-issue](../workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, discovers the project stack, writes code and tests, runs validation, and opens a PR with a self-review. Generic crawl-tier implementation agent |
 | [pme-triage](../workflows/pme-triage.md) | Every 6 hours / manual | Fetches PMEs from Salesforce, cross-references GitHub Issues, creates issues for untracked PMEs |
+| [agent-generate-tests](../workflows/agent-generate-tests.md) | PR labeled `agent:tests` | Generates tests for the PR's new behavior and pushes them back to the PR branch. Tests-only — never modifies source or existing tests |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 

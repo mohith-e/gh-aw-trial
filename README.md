@@ -41,6 +41,7 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `fortify-fix` | Reads a Fortify issue and opens a focused fix PR | Issue labeled `fortify-fix` |
 | `implement-issue` | Reads an issue, writes code + tests, opens a PR with self-review | Issue labeled `agent:implement` |
 | `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
+| `agent-generate-tests` | Generates tests for a PR's new behavior and pushes them back to the PR branch | PR labeled `agent:tests` |
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 
