@@ -28,6 +28,16 @@ These are end-to-end workflows that chain multiple agents together:
 | [implement-issue](../workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, discovers the project stack, writes code and tests, runs validation, and opens a PR with a self-review. Generic crawl-tier implementation agent |
 | [pme-triage](../workflows/pme-triage.md) | Every 6 hours / manual | Fetches PMEs from Salesforce, cross-references GitHub Issues, creates issues for untracked PMEs |
 | [agent-generate-tests](../workflows/agent-generate-tests.md) | PR labeled `agent:tests` | Generates tests for the PR's new behavior and pushes them back to the PR branch. Tests-only — never modifies source or existing tests |
+| [fix-failing-tests](../workflows/fix-failing-tests.md) | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review |
+
+## Recommended Upstream Workflows
+
+These workflows live in [`githubnext/agentics`](https://github.com/githubnext/agentics/tree/main/workflows) rather than this repo. We recommend pairing them with `fix-failing-tests` for a full test-failure remediation story. See [`docs/workflows/fix-failing-tests.md`](workflows/fix-failing-tests.md) for the "when to use which" comparison.
+
+| Workflow | Trigger | What It Does |
+|----------|---------|-------------|
+| [pr-fix](https://github.com/githubnext/agentics/blob/main/workflows/pr-fix.md) | Comment `/pr-fix` on a PR | Pushes a fix directly to the PR branch when its CI is failing |
+| [ci-doctor](https://github.com/githubnext/agentics/blob/main/workflows/ci-doctor.md) | Monitored `workflow_run` completes with failure | Diagnostic only — opens an issue with root-cause analysis |
 
 > **Not included:** `implementation.md` is project-specific (references your codebase paths, test commands, and tech stack). Use the template in [agentic-workflow-template](https://github.com/RealPage/agentic-workflow-template) as a starting point.
 

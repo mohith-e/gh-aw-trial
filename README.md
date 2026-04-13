@@ -42,6 +42,18 @@ That's it. Label an issue `feature-idea` and the agent writes a PRD and opens a 
 | `implement-issue` | Reads an issue, writes code + tests, opens a PR with self-review | Issue labeled `agent:implement` |
 | `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
 | `agent-generate-tests` | Generates tests for a PR's new behavior and pushes them back to the PR branch | PR labeled `agent:tests` |
+| `fix-failing-tests` | Diagnoses default-branch CI failures and opens a fix PR | CI failure on `main`, or issue labeled `agent:fix-tests` |
+
+### Recommended upstream workflows
+
+These live in [`githubnext/agentics`](https://github.com/githubnext/agentics/tree/main/workflows) rather than this repo, but we recommend pairing them with ours for a full test-failure remediation story:
+
+| Workflow | What it does | How to add |
+|---|---|---|
+| `pr-fix` | Pushes a fix directly to your open PR branch when its CI is failing | `gh aw add githubnext/agentics/pr-fix` + comment `/pr-fix` on a PR |
+| `ci-doctor` | Diagnostic-only. Reads failed runs and opens an issue with root-cause analysis | `gh aw add githubnext/agentics/ci-doctor` |
+
+See [`docs/workflows/fix-failing-tests.md`](docs/workflows/fix-failing-tests.md) for when to use each.
 
 Pick and choose. You don't need all of them — add only what's useful for your project.
 

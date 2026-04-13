@@ -52,6 +52,7 @@ The markdown body contains natural language instructions that Claude agents foll
 | `implement-issue` | Issue labeled `agent:implement` | Reads an issue, discovers the project's stack, writes code and tests, runs validation, and opens a PR with a self-review |
 | `pme-triage` | Every 6 hours / manual | Fetches PMEs from Salesforce, cross-references GitHub Issues, creates issues for untracked PMEs |
 | `agent-generate-tests` | PR labeled `agent:tests` | Generates tests for the PR's new behavior and pushes them back to the PR branch. Tests-only — never modifies source or existing tests. See also upstream `daily-test-improver` for scheduled, incremental coverage improvement across the whole repo |
+| `fix-failing-tests` | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review. Pairs with upstream `pr-fix` (open PRs) and `ci-doctor` (diagnosis only) |
 
 ## How Consumer Repos Use This
 
