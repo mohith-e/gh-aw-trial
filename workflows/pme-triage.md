@@ -165,6 +165,11 @@ on:
       with:
         name: pme-context
         path: /tmp/gh-aw/agent/pme-context.json
+        # Artifact only needs to survive until the agent job downloads it
+        # (seconds, not days). If the schedule frequency is reduced (e.g.
+        # weekly), this does NOT need to change — it's cross-job within a
+        # single run, not cross-run. Only increase if the workflow itself
+        # takes >1 day to complete.
         retention-days: 1
 
 permissions:

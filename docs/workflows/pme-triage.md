@@ -35,7 +35,7 @@ The workflow uses a **deterministic pre-step + agentic classification** architec
 
 ### Pre-Step (deterministic)
 
-Runs as a standard GitHub Actions step before the agent, outside the firewall sandbox:
+Runs in the **pre-activation job** (`on.steps:`), a separate GitHub Actions job that executes before the agent. This job has access to secrets (for Salesforce OAuth) but is isolated from the agent sandbox.
 
 1. **Salesforce Auth & Fetch** — Authenticates via OAuth client_credentials and queries Salesforce for open PMEs within the lookback window, filtered by product and/or priority. If authentication fails, writes an error to the context file for the agent to handle.
 
@@ -45,7 +45,9 @@ Runs as a standard GitHub Actions step before the agent, outside the firewall sa
 
 4. **State File Load** — Reads `pme-state.json` from the `memory/pme-triage` branch via `git show`.
 
-5. **Context Assembly** — Writes all data to `/tmp/gh-aw/agent/pme-context.json` for the agent.
+5. **Context Assembly** — Writes all data to `/tmp/gh-aw/agent/pme-context.json`.
+
+6. **Artifact Upload** — Uploads the context file as a GitHub Actions artifact. Since the pre-step and agent run in separate jobs (separate runners), files don't persist across them. The agent job downloads this artifact before the agent starts, placing the context file where the agent expects it. The artifact is ephemeral (1-day retention) — it only needs to survive long enough for the agent job to download it within the same workflow run. Cross-run state is handled separately by [repo memory](#repo-memory), which is persistent.
 
 ### Agent (agentic)
 
