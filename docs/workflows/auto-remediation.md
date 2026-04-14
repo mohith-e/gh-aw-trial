@@ -52,7 +52,7 @@ The auto-remediation agent runs on a schedule (every 2 hours) or manually via `w
 
 ```bash
 # Add the workflow (wizard walks through configuration)
-gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.2.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/auto-remediation.md@v0.2.0
 ```
 
 The wizard prompts for the required inputs. For scheduled runs, edit your local `.github/workflows/auto-remediation.md` to add `default:` values since there's no one to provide inputs interactively.

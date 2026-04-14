@@ -7,13 +7,13 @@ Automated AI code reviewer. When a PR is opened or reopened, the agent analyzes 
 **From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
 
 ```bash
-gh aw add-wizard RealPage/agentics/agent-review-pr
+gh aw add-wizard RealPage/agentic-workflows/agent-review-pr
 ```
 
 **From Claude Code or any non-interactive shell** (`add-wizard` requires a TTY, so use the non-interactive `add`):
 
 ```bash
-gh aw add RealPage/agentics/agent-review-pr
+gh aw add RealPage/agentic-workflows/agent-review-pr
 ```
 
 Once installed, every new PR will automatically receive a review. No label needed — the workflow fires on `opened` and `reopened`.

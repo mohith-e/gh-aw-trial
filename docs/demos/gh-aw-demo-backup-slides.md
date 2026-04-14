@@ -231,7 +231,7 @@ GitHub repos        ──→  gh-aw         ──→  Issues, PRs, Actions
 gh aw add-wizard
 
 # Path B: Import from shared library — one command, pulls from org's shared repo
-gh aw add RealPage/agentics/auto-remediation
+gh aw add RealPage/agentic-workflows/auto-remediation
 
 # Then compile and push
 gh aw compile && git push

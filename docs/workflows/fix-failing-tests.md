@@ -7,7 +7,7 @@ Works alongside two upstream workflows from `githubnext/agentics` that cover adj
 ## Getting Started
 
 ```bash
-gh aw add RealPage/agentics/fix-failing-tests
+gh aw add RealPage/agentic-workflows/fix-failing-tests
 ```
 
 After installing, open `.github/workflows/fix-failing-tests.md` and replace `"CI"` in the `workflows:` list with the actual name(s) of your CI/test workflows (e.g., `["CI", "Tests", "Build"]`). Then run `gh aw compile`. The workflow only fires on the default branch (`main`) and only when one of the named workflows completes with a failure.
@@ -98,6 +98,25 @@ gh aw add githubnext/agentics/ci-doctor
 - **No unrelated refactoring** — every line of the diff must be justified by the failure
 
 When the agent can't fix something without breaking these rules, it escalates: either `noop` with a diagnosis comment, or a draft PR with analysis for a human to take over.
+
+## Common Mistakes
+
+### Using `["*"]` for `workflow_run` triggers
+
+The workflow frontmatter defaults to `workflows: ["CI"]`. If you change this to `["*"]`, the workflow fires on **every** workflow completion in your repo — including its own runs, scheduled utility workflows (CodeQL, metrics collectors, triage agents), and maintenance jobs. This causes cascading runs and wastes API credits. Only list the actual CI/test/build workflow names that, when they fail, indicate a test regression the agent should fix.
+
+### Installing on repos without a CI test suite
+
+`fix-failing-tests` is designed to diagnose and fix **test failures**. On repos that have no test suite (documentation repos, tracker repos, config-only repos), the `workflow_run` trigger has no useful target. The only failures it can pick up are from unrelated workflows (PME Triage, CodeQL, scanners), which aren't test failures and aren't something this agent can fix. On such repos, omit the `workflow_run` trigger entirely and use `issues` labeled (`agent:fix-tests`) or `workflow_dispatch` only.
+
+### Listing non-test workflows in the trigger
+
+Even when not using `["*"]`, be selective. Only list workflows whose failures indicate broken tests or broken builds. Don't include:
+- **Scheduled utility workflows** (metrics collectors, triage agents, scanners)
+- **Code quality tools** (CodeQL, linting-only workflows) — unless lint failures are blocking your CI
+- **Documentation or maintenance workflows**
+
+If a workflow isn't something where "the agent should try to fix the code," it doesn't belong in the `workflows:` list.
 
 ## Customizing for Your Repo
 

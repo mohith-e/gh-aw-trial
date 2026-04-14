@@ -26,13 +26,13 @@ gh label create ready-for-decomposition --description "Issue is too large; break
 **From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
 
 ```bash
-gh aw add-wizard RealPage/agentics/implement-issue
+gh aw add-wizard RealPage/agentic-workflows/implement-issue
 ```
 
 **From Claude Code or any non-interactive shell** (`add-wizard` requires a TTY, so use the non-interactive `add` instead):
 
 ```bash
-gh aw add RealPage/agentics/implement-issue
+gh aw add RealPage/agentic-workflows/implement-issue
 ```
 
 Then label any issue `agent:implement` and watch it work.

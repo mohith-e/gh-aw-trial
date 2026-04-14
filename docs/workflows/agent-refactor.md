@@ -11,13 +11,13 @@ Developer-directed, behavior-preserving refactor agent. One run, one area, one P
 **From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
 
 ```bash
-gh aw add-wizard RealPage/agentics/agent-refactor
+gh aw add-wizard RealPage/agentic-workflows/agent-refactor
 ```
 
 **From Claude Code or any non-interactive shell** (`add-wizard` requires a TTY, so use the non-interactive `add`):
 
 ```bash
-gh aw add RealPage/agentics/agent-refactor
+gh aw add RealPage/agentic-workflows/agent-refactor
 ```
 
 Then label an issue or PR `agent:refactor` and the agent will start a run.

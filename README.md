@@ -21,10 +21,10 @@ cd your-repo
 git checkout main
 
 # From your terminal (guided setup)
-gh aw add-wizard RealPage/agentics/workflows/agent-review-pr.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/agent-review-pr.md@v0.3.0
 
 # From Claude Code or any non-interactive shell
-gh aw add RealPage/agentics/workflows/agent-review-pr.md@v0.3.0
+gh aw add RealPage/agentic-workflows/workflows/agent-review-pr.md@v0.3.0
 ```
 
 > **Caution:** `add-wizard` has been observed to push commits directly to the current branch on repos without branch protection. Run it from a feature branch or ensure branch protection is enabled. Use `gh aw add` for a non-interactive alternative that generates files locally without pushing. For repos with the gh-aw dispatcher agent already set up (`.github/agents/agentic-workflows.agent.md`), you can also ask the agent directly in Claude Code or Copilot to install the workflow — no CLI command needed.
@@ -40,7 +40,7 @@ Install the workflow that **writes tests for your new code**. Open a PR, label i
 ```bash
 cd your-repo
 git checkout main
-gh aw add-wizard RealPage/agentics/workflows/agent-generate-tests.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/agent-generate-tests.md@v0.3.0
 ```
 
 Open any PR with new behavior, slap on the `agent:tests` label, and watch commits appear on your branch. The agent writes tests only — it never touches your source code, and if it finds a bug while trying to write a test, it comments on the PR and refuses to "fix" the source on its own.
@@ -48,6 +48,16 @@ Open any PR with new behavior, slap on the `agent:tests` label, and watch commit
 **Why this is the bigger step:** `agent-generate-tests` actually writes code. It is tightly scoped (tests, not source), self-sandboxing (one commit per run), and paranoid about drift (refuses to run on a red baseline). You're extending real trust — it ends up with commit rights to a PR branch. Start here when you want to see an agent produce something shippable.
 
 **You can install both.** They don't conflict: one only comments, the other only writes tests. Together they form a practical first stack.
+
+### Try before you install
+
+Not ready to commit a workflow to your repo? Use `gh aw trial` to run a one-off execution without merging anything:
+
+```bash
+gh aw trial RealPage/agentic-workflows/workflows/agent-review-pr.md@v0.3.0
+```
+
+This triggers a single run against your repo without adding any workflow files. It's the safest way to evaluate whether a workflow is useful on your codebase before installing it permanently.
 
 ---
 
@@ -116,7 +126,7 @@ The **single biggest unlock** is safe-outputs: instead of your script holding ra
 1. **Read one of our workflows.** Any file under [`workflows/`](workflows/) is the full agent. The frontmatter declares the trigger and what it's allowed to write; the body is the prompt.
 2. **Copy the shape.** Take your existing prompt. Put it in a new markdown file with gh-aw frontmatter. Replace your `anthropic.messages.create(...)` glue with the matching `safe-outputs:` declaration.
 3. **Test it in a throwaway repo first.** Create an empty sandbox repo you don't mind breaking, point a consumer stub at your branch (`@my-branch`), and iterate there before touching anything real.
-4. **Move it to a shared repo** once it works. Either add it here in `RealPage/agentics` (PRs welcome — see **Contributing** below) or keep it in your own team's repo and import it the same way.
+4. **Move it to a shared repo** once it works. Either add it here in `RealPage/agentic-workflows` (PRs welcome — see **Contributing** below) or keep it in your own team's repo and import it the same way.
 
 If your homegrown agent depends on a tool gh-aw doesn't expose yet, the escape hatch is [MCP servers](https://github.github.com/gh-aw/reference/tools/#mcp-servers) — declare them in the workflow frontmatter and the agent gets access. Most of what a laptop script does (git, file reads, bash, HTTP) is already built into gh-aw.
 
@@ -173,7 +183,7 @@ The five golden workflows above are the recommended on-ramp. The full set — in
 Install any of them the same way:
 
 ```bash
-gh aw add-wizard RealPage/agentics/workflows/<workflow-name>.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/<workflow-name>.md@v0.3.0
 ```
 
 ### Adding auto-remediation
@@ -181,7 +191,7 @@ gh aw add-wizard RealPage/agentics/workflows/<workflow-name>.md@v0.3.0
 The auto-remediation workflow needs a few extra inputs (Elastic endpoints, Kibana config). The wizard walks you through them:
 
 ```bash
-gh aw add-wizard RealPage/agentics/workflows/auto-remediation.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/auto-remediation.md@v0.3.0
 ```
 
 > **Important:** GitHub Actions does not populate `inputs.*` on scheduled runs — `workflow_dispatch` input defaults are UI-only and have no runtime effect. This workflow uses a workflow-level `env:` block instead. After import, open `.github/workflows/auto-remediation.md` and fill in `SERVICE_NAME`, `KIBANA_BASE_URL`, `KIBANA_DATA_VIEW_ID`, and `TITLE_PREFIX` in the `env:` section at the top. Then run `gh aw compile`. Because `gh aw update` does a 3-way merge, your values will be preserved across updates.

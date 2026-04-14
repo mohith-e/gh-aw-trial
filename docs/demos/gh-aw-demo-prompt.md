@@ -57,7 +57,7 @@ Help me build a structured, rehearsable **1-hour demo** with the following segme
 
 ### Segment 4: How Easy It Is to Create Workflows (10 min)
 
-- Live demo using the [agentics](https://github.com/RealPage/agentics) repo
+- Live demo using the [agentics](https://github.com/RealPage/agentic-workflows) repo
 - Show the repo README with the Feature Development Pipeline and Auto-Remediation Pipeline diagrams
 - Walk through creating a workflow from scratch:
   1. Create a markdown file in `.github/workflows/`
@@ -68,10 +68,10 @@ Help me build a structured, rehearsable **1-hour demo** with the following segme
 - Show the **import/composition model**: how consumer repos create thin stubs that import shared logic:
   ```yaml
   imports:
-    - RealPage/agentics/workflows/prd-generation.md@v0.1.0
+    - RealPage/agentic-workflows/workflows/prd-generation.md@v0.1.0
   ```
 - Compare to STRATIS BORG's 3-step wizard: "You have a great wizard. gh-aw's equivalent is a markdown file and `gh aw compile`. Different approach, same outcome — making it dead simple to stand up a workflow."
-- Run `gh aw add-wizard RealPage/agentics/workflows/prd-generation.md` live — show the wizard generating the consumer stub automatically
+- Run `gh aw add-wizard RealPage/agentic-workflows/workflows/prd-generation.md` live — show the wizard generating the consumer stub automatically
 
 ### Segment 5: End-to-End SDLC Demo with lumina-agents-mcp (20 min)
 
@@ -122,7 +122,7 @@ This is the centerpiece. Use the [lumina-agents-mcp](https://github.com/RealPage
 
 - Reiterate complementary positioning: "STRATIS BORG is great for your Azure DevOps teams. gh-aw is great for your GitHub teams. Together, you cover your entire engineering org."
 - Call to action: "For any team on GitHub today, they can start with one workflow — maybe auto-remediation or PRD generation — and grow from there. No platform to deploy, no infrastructure to maintain."
-- Share resources: gh-aw docs, RealPage/agentics repo, githubnext/agentics upstream library, Agent Factory blog series
+- Share resources: gh-aw docs, RealPage/agentic-workflows repo, githubnext/agentics upstream library, Agent Factory blog series
 
 ## Key Constraints
 

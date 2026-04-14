@@ -77,7 +77,7 @@ Teams review the created issues, assign ownership, and link to implementation wo
 
 ```bash
 # Add the workflow (wizard walks through configuration)
-gh aw add-wizard RealPage/agentics/workflows/pme-triage.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/pme-triage.md@v0.3.0
 ```
 
 The wizard prompts for optional inputs. For scheduled runs, edit your local `.github/workflows/pme-triage.md` to add `default:` values for your product filter since there's no one to provide inputs interactively.

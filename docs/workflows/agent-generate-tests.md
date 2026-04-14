@@ -7,13 +7,13 @@ On-demand test writer. Label an open PR `agent:tests` and the agent reads the di
 **From your terminal** (recommended — guided setup for engine, secrets, and PR creation):
 
 ```bash
-gh aw add-wizard RealPage/agentics/agent-generate-tests
+gh aw add-wizard RealPage/agentic-workflows/agent-generate-tests
 ```
 
 **From Claude Code or any non-interactive shell** (`add-wizard` requires a TTY, so use the non-interactive `add`):
 
 ```bash
-gh aw add RealPage/agentics/agent-generate-tests
+gh aw add RealPage/agentic-workflows/agent-generate-tests
 ```
 
 Then label any open PR `agent:tests` and the agent will push tests to that PR's branch.
@@ -66,7 +66,7 @@ on:
   pull_request:
     types: [labeled]
 imports:
-  - RealPage/agentics/workflows/agent-generate-tests.md@<version>
+  - RealPage/agentic-workflows/workflows/agent-generate-tests.md@<version>
 ---
 ```
 

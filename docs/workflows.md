@@ -74,7 +74,7 @@ on:
     types: [opened, labeled]
 
 imports:
-  - RealPage/agentics/workflows/prd-generation.md@v0.1.0
+  - RealPage/agentic-workflows/workflows/prd-generation.md@v0.1.0
 ---
 ```
 

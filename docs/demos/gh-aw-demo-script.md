@@ -88,7 +88,7 @@ git checkout main && git pull
 
 1. [gh-aw docs — Overview](https://github.github.com/gh-aw/introduction/overview/)
 2. [gh-aw blog / Agent Factory](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)
-3. [agentics README](https://github.com/RealPage/agentics)
+3. [Realpage Agentic Workflows README](https://github.com/RealPage/agentic-workflows)
 4. [lumina-agents-mcp repo](https://github.com/RealPage/lumina-agents-mcp)
 5. [lumina-agents-mcp workflows directory](https://github.com/RealPage/lumina-agents-mcp/tree/main/.github/workflows)
 6. [lumina-agents-mcp CLAUDE.md](https://github.com/RealPage/lumina-agents-mcp/blob/main/CLAUDE.md)
@@ -259,7 +259,7 @@ This is where the audience starts thinking "I could do this." Show the simplicit
 ### Live Demo Steps
 
 **Step 1: Show the shared workflows repo** (2 min)
-- Switch to browser tab: [agentics README](https://github.com/RealPage/agentics)
+- Switch to browser tab: [Realpage Agentic Workflows README](https://github.com/RealPage/agentic-workflows)
 - Show the two pipeline diagrams (Mermaid renders in GitHub)
 
 > "This is our shared workflows repo. It contains six reusable workflows organized into two pipelines. Feature development — from idea to validated PR. And auto-remediation — from error log to fix PR. Consumer repos import these, they don't copy them."
@@ -330,7 +330,7 @@ cat .github/workflows/code-review.md
 
 ```bash
 # Pull a production-ready workflow from our shared library — one command
-gh aw add RealPage/agentics/auto-remediation
+gh aw add RealPage/agentic-workflows/auto-remediation
 ```
 
 > "Now let me show you the other path — pulling from a shared workflow library. We've built a set of production-ready workflows in our agentics repo. Instead of writing from scratch, a team can pull a ready-made workflow with one command."
@@ -369,7 +369,7 @@ git checkout -- .  # Reset any changes
 > *(Don't narrate this — just quickly clean up before moving on.)*
 
 **Step 7: Show the full catalog** (30 sec)
-- Switch to browser tab: [agentics workflows/](https://github.com/RealPage/agentics/tree/main/workflows)
+- Switch to browser tab: [Realpage Agentic Workflows workflows/](https://github.com/RealPage/agentic-workflows/tree/main/workflows)
 
 > "Here's our full library — PRD generation, decomposition, skill selection, MCP selection, validation, auto-remediation. Each one is 8-26 lines. A team can pull any combination with `gh aw add` and have a working pipeline in minutes."
 
@@ -695,7 +695,7 @@ Reinforce the lego-block philosophy. Show this audience they wouldn't be locked 
 **Share links:**
 - [gh-aw Documentation](https://github.github.com/gh-aw/)
 - [github/gh-aw Repository](https://github.com/github/gh-aw) (3.7k stars, MIT license)
-- [agentics](https://github.com/RealPage/agentics) (our shared workflows)
+- [Realpage Agentic Workflows](https://github.com/RealPage/agentic-workflows) (our shared workflows)
 - [Agentics Template](https://github.com/githubnext/agentics-template) (starter template)
 - [Agentics Sample Pack](https://github.com/githubnext/agentics) (50+ workflows)
 - [Agent Factory Blog Series](https://github.github.com/gh-aw/blog/2026-01-12-welcome-to-pelis-agent-factory/)

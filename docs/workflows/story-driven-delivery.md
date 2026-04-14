@@ -307,13 +307,13 @@ Product Owner decides **what** to build. Design defines **who** it's for and **w
 ### 1. Decomposition Workflow
 
 ```bash
-gh aw add-wizard RealPage/agentics/workflows/story-decomposition.md@v0.2.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/story-decomposition.md@v0.2.0
 ```
 
 ### 2. Implementation Workflow
 
 ```bash
-gh aw add-wizard RealPage/agentics/workflows/implement-issue.md@v0.3.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/implement-issue.md@v0.3.0
 ```
 
 Use [`implement-issue`](../../workflows/implement-issue.md) as the default implementation agent. It discovers your repo's stack, test commands, and conventions at runtime so it works out of the box. Customize it for your repo once you want faster, more predictable runs (see [`docs/workflows/implement-issue.md`](implement-issue.md) for upgrade prompts).
@@ -321,7 +321,7 @@ Use [`implement-issue`](../../workflows/implement-issue.md) as the default imple
 ### 3. Validation Workflow
 
 ```bash
-gh aw add-wizard RealPage/agentics/workflows/validation.md@v0.2.0
+gh aw add-wizard RealPage/agentic-workflows/workflows/validation.md@v0.2.0
 ```
 
 ## Prerequisites

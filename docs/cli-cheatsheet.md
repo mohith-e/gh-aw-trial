@@ -10,7 +10,7 @@ Quick reference for common `gh aw` commands when working with agentic workflows.
 gh aw init
 
 # Add a workflow from a shared library (interactive wizard — walks through setup and creates a PR)
-gh aw add-wizard RealPage/agentics/workflows/<workflow-name>.md@<version>
+gh aw add-wizard RealPage/agentic-workflows/workflows/<workflow-name>.md@<version>
 
 # Compile a workflow stub into a GitHub Actions lock file
 gh aw compile [workflow-name]
