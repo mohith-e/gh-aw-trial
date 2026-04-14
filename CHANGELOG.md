@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/RealPage/agentic-workflows/compare/v0.3.0...v0.3.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* drop Claude API mention from README intro ([#49](https://github.com/RealPage/agentic-workflows/issues/49)) ([3cc979a](https://github.com/RealPage/agentic-workflows/commit/3cc979a454cf329ffd1b9d76f5963b53d852f874))
+* safer defaults for fix-failing-tests trigger ([#50](https://github.com/RealPage/agentic-workflows/issues/50)) ([7e18444](https://github.com/RealPage/agentic-workflows/commit/7e184447682fc323010680367f61d4f124a0e5e2))
+* soften add-wizard safety note to reflect observed behavior ([#48](https://github.com/RealPage/agentic-workflows/issues/48)) ([2ac47e0](https://github.com/RealPage/agentic-workflows/commit/2ac47e01ac399123f17011d6f3e73f67b8460687))
+
 ## [0.3.0](https://github.com/RealPage/agentic-workflows/compare/v0.2.0...v0.3.0) (2026-04-13)
 
 
