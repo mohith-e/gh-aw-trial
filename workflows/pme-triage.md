@@ -124,11 +124,11 @@ on:
           CHATTER_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
             -H "Authorization: Bearer $TOKEN" \
             --data-urlencode "q=$CHATTER_QUERY" 2>"$CHATTER_ERR") || true
-          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq . > /dev/null 2>&1; then
-            echo "::warning::Chatter fetch failed: $(cat "$CHATTER_ERR")"
+          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq -e '.totalSize' > /dev/null 2>&1; then
+            echo "::warning::Chatter fetch failed or returned error: $(cat "$CHATTER_ERR") $(echo "$CHATTER_RESULT" | head -c 500)"
             echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
           else
-            CHATTER_COUNT=$(echo "$CHATTER_RESULT" | jq '.totalSize // 0')
+            CHATTER_COUNT=$(echo "$CHATTER_RESULT" | jq '.totalSize')
             echo "Fetched $CHATTER_COUNT Chatter post(s)."
             echo "$CHATTER_RESULT" | jq '
               .records
