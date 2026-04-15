@@ -135,21 +135,37 @@ on:
             echo "::warning::Chatter fetch failed: $(cat "$CHATTER_ERR") $(echo "$CHATTER_RESULT" | head -c 500)"
             echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
           else
-            # Transform Composite response into {pme_sf_id: [{body, author, created_date}]}
+            # Transform Composite response into {pme_sf_id: [{body, author, created_date, type}]}
+            # Extracts both top-level posts and nested comment replies.
             echo "$CHATTER_RESULT" | jq '
               [.compositeResponse[]
                 | select(.httpStatusCode == 200)
                 | .referenceId as $pid
                 | (.body.elements // [])[]
-                | {
-                    body: .body.text,
-                    author: .actor.displayName,
-                    created_date: .createdDate,
-                    parent_id: $pid
-                  }
+                | (
+                    # Top-level post
+                    {
+                      body: .body.text,
+                      author: .actor.displayName,
+                      created_date: .createdDate,
+                      type: "post",
+                      parent_id: $pid
+                    }
+                  ),
+                  (
+                    # Nested comment replies
+                    (.capabilities.comments.page.items // [])[]
+                    | {
+                        body: .body.text,
+                        author: .actor.displayName,
+                        created_date: .createdDate,
+                        type: "comment",
+                        parent_id: $pid
+                      }
+                  )
               ]
               | group_by(.parent_id)
-              | map({key: .[0].parent_id, value: .})
+              | map({key: .[0].parent_id, value: (. | sort_by(.created_date) | reverse)})
               | from_entries
             ' > /tmp/gh-aw/agent/chatter-by-pme.json
             CHATTER_PME_COUNT=$(jq 'keys | length' /tmp/gh-aw/agent/chatter-by-pme.json)
