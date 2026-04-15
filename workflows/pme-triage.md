@@ -82,7 +82,8 @@ on:
           Issue_Summary__c, Client_Update__c, Case_Number__c, \
           Domain__c, Functional_Area__c, Support_Product_Name__c, \
           Business_Days_Open__c, Reopen_Count__c, Related_PME__c, \
-          Code_Fix_Reason__c, Tags__c \
+          Code_Fix_Reason__c, Tags__c, \
+          (SELECT Body, CreatedDate, CreatedBy.Name, CommentCount FROM Feeds ORDER BY CreatedDate DESC) \
           FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${LOOKBACK_DAYS}"
         if [ -n "${PRODUCT_FILTER:-}" ]; then
           QUERY="${QUERY} AND Support_Product_Name__c LIKE '${PRODUCT_FILTER}'"
@@ -103,56 +104,6 @@ on:
         rm -f "$SF_ERR"
         PME_COUNT=$(echo "$SF_RESULT" | jq '.totalSize // 0')
         echo "Fetched $PME_COUNT PME(s) from Salesforce."
-        echo "::endgroup::"
-
-        #──────────────────────────────────────────────
-        # 2.5. Fetch Chatter for PME records
-        #──────────────────────────────────────────────
-        # Uses the Chatter Connect REST API per-PME (not SOQL on FeedItem,
-        # which is blocked in many SF orgs, and not the Composite API, which
-        # returns 404 for Chatter Connect endpoints).
-        echo "::group::Chatter fetch"
-        if [ "$PME_COUNT" -eq 0 ]; then
-          echo "No PMEs — skipping Chatter fetch."
-          echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
-        else
-          echo "Fetching Chatter for $PME_COUNT PME(s) via Chatter Connect REST API..."
-          echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
-          CHATTER_TOTAL=0
-          CHATTER_PME_COUNT=0
-          for PME_ID in $(echo "$SF_RESULT" | jq -r '.records[].Id'); do
-            FEED=$(curl -s "https://realpage.my.salesforce.com/services/data/v62.0/chatter/feeds/record/${PME_ID}/feed-elements?pageSize=10" \
-              -H "Authorization: Bearer $TOKEN" 2>/dev/null) || true
-            if [ -z "$FEED" ] || ! echo "$FEED" | jq -e '.elements' > /dev/null 2>&1; then
-              continue
-            fi
-            # Extract TextPost bodies + nested comment replies, skip TrackedChange/null entries
-            ENTRIES=$(echo "$FEED" | jq --arg pid "$PME_ID" '
-              [.elements[]
-                | select(.type == "TextPost" and .body.text != null)
-                | (
-                    {body: .body.text, author: .actor.displayName, created_date: .createdDate, type: "post", parent_id: $pid}
-                  ),
-                  (
-                    (.capabilities.comments.page.items // [])[]
-                    | select(.body.text != null)
-                    | {body: .body.text, author: .actor.displayName, created_date: .createdDate, type: "comment", parent_id: $pid}
-                  )
-              ] | sort_by(.created_date) | reverse
-            ') || true
-            ENTRY_COUNT=$(echo "$ENTRIES" | jq 'length' 2>/dev/null || echo 0)
-            if [ "$ENTRY_COUNT" -gt 0 ]; then
-              # Merge into the chatter-by-pme JSON file
-              jq --arg pid "$PME_ID" --argjson entries "$ENTRIES" \
-                '. + {($pid): $entries}' /tmp/gh-aw/agent/chatter-by-pme.json \
-                > /tmp/gh-aw/agent/chatter-by-pme.tmp && \
-                mv /tmp/gh-aw/agent/chatter-by-pme.tmp /tmp/gh-aw/agent/chatter-by-pme.json
-              CHATTER_TOTAL=$((CHATTER_TOTAL + ENTRY_COUNT))
-              CHATTER_PME_COUNT=$((CHATTER_PME_COUNT + 1))
-            fi
-          done
-          echo "Fetched $CHATTER_TOTAL Chatter post(s) across $CHATTER_PME_COUNT PME(s)."
-        fi
         echo "::endgroup::"
 
         #──────────────────────────────────────────────
@@ -224,7 +175,6 @@ on:
           --argjson gh_issues "$GH_ISSUES" \
           --argjson labels "$LABELS_EXIST" \
           --argjson state "$STATE" \
-          --slurpfile chatter /tmp/gh-aw/agent/chatter-by-pme.json \
           --arg product_filter "${PRODUCT_FILTER:-}" \
           --arg priority_filter "${PRIORITY_FILTER:-}" \
           --arg lookback_days "$LOOKBACK_DAYS" \
@@ -242,7 +192,7 @@ on:
             gh_issues: $gh_issues,
             labels: $labels,
             state: $state,
-            chatter: $chatter[0]
+            chatter: ($sf_pmes.records // [] | [.[] | select(.Feeds.records != null) | {key: .Id, value: [.Feeds.records[] | select(.Body != null) | {body: .Body, author: .CreatedBy.Name, created_date: .CreatedDate, comment_count: (.CommentCount // 0)}]}] | [.[] | select(.value | length > 0)] | from_entries)
           }' > /tmp/gh-aw/agent/pme-context.json
 
         echo "Context file written: $(wc -c < /tmp/gh-aw/agent/pme-context.json) bytes"
