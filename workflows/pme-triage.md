@@ -72,7 +72,18 @@ on:
         # 2. SOQL query — fetch open PMEs
         #──────────────────────────────────────────────
         echo "::group::SOQL query"
-        QUERY="SELECT Id, Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${LOOKBACK_DAYS}"
+        QUERY="SELECT Id, Name, Summary__c, Description__c, Priority__c, Escalation_Status__c, \
+          Accountable_Team__c, Responsible_Team__c, Impacted_Products__c, \
+          Azure_DevOps_ID__c, Azure_DevOps_URL__c, CreatedDate, LastModifiedDate, \
+          Latest_Comment__c, Current_PME_Update__c, Customer_Impact__c, Business_Impact__c, \
+          Support_Comments__c, Support_Impact__c, Escalation_Notes__c, \
+          Steps_Support_has_attempted__c, Error_Message__c, \
+          Resolution_Summary__c, Resolution_Type__c, Resolution_Status__c, \
+          Issue_Summary__c, Client_Update__c, Case_Number__c, \
+          Domain__c, Functional_Area__c, Support_Product_Name__c, \
+          Business_Days_Open__c, Reopen_Count__c, Related_PME__c, \
+          Code_Fix_Reason__c, Tags__c \
+          FROM Problem_Management_Escalation__c WHERE Escalation_Status__c NOT IN ('Closed', 'Resolved') AND CreatedDate >= LAST_N_DAYS:${LOOKBACK_DAYS}"
         if [ -n "${PRODUCT_FILTER:-}" ]; then
           QUERY="${QUERY} AND Support_Product_Name__c LIKE '${PRODUCT_FILTER}'"
         fi
@@ -92,6 +103,48 @@ on:
         rm -f "$SF_ERR"
         PME_COUNT=$(echo "$SF_RESULT" | jq '.totalSize // 0')
         echo "Fetched $PME_COUNT PME(s) from Salesforce."
+        echo "::endgroup::"
+
+        #──────────────────────────────────────────────
+        # 2.5. Fetch Chatter (FeedItem) for PME records
+        #──────────────────────────────────────────────
+        echo "::group::Chatter fetch"
+        if [ "$PME_COUNT" -eq 0 ]; then
+          echo "No PMEs — skipping Chatter fetch."
+          echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
+        else
+          IN_CLAUSE=$(echo "$SF_RESULT" | jq -r '
+            [.records[].Id]
+            | map("\u0027" + . + "\u0027")
+            | join(",")
+          ')
+          CHATTER_QUERY="SELECT Id, Body, CreatedDate, CreatedBy.Name, ParentId FROM FeedItem WHERE ParentId IN (${IN_CLAUSE}) ORDER BY CreatedDate DESC LIMIT 100"
+          echo "Chatter query: $CHATTER_QUERY"
+          CHATTER_ERR=$(mktemp)
+          CHATTER_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
+            -H "Authorization: Bearer $TOKEN" \
+            --data-urlencode "q=$CHATTER_QUERY" 2>"$CHATTER_ERR") || true
+          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq . > /dev/null 2>&1; then
+            echo "::warning::Chatter fetch failed: $(cat "$CHATTER_ERR")"
+            echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
+          else
+            CHATTER_COUNT=$(echo "$CHATTER_RESULT" | jq '.totalSize // 0')
+            echo "Fetched $CHATTER_COUNT Chatter post(s)."
+            echo "$CHATTER_RESULT" | jq '
+              .records
+              | map({
+                  body: .Body,
+                  author: .CreatedBy.Name,
+                  created_date: .CreatedDate,
+                  parent_id: .ParentId
+                })
+              | group_by(.parent_id)
+              | map({key: .[0].parent_id, value: .})
+              | from_entries
+            ' > /tmp/gh-aw/agent/chatter-by-pme.json
+          fi
+          rm -f "$CHATTER_ERR"
+        fi
         echo "::endgroup::"
 
         #──────────────────────────────────────────────
@@ -163,6 +216,7 @@ on:
           --argjson gh_issues "$GH_ISSUES" \
           --argjson labels "$LABELS_EXIST" \
           --argjson state "$STATE" \
+          --slurpfile chatter /tmp/gh-aw/agent/chatter-by-pme.json \
           --arg product_filter "${PRODUCT_FILTER:-}" \
           --arg priority_filter "${PRIORITY_FILTER:-}" \
           --arg lookback_days "$LOOKBACK_DAYS" \
@@ -179,7 +233,8 @@ on:
             sf_pmes: $sf_pmes,
             gh_issues: $gh_issues,
             labels: $labels,
-            state: $state
+            state: $state,
+            chatter: $chatter[0]
           }' > /tmp/gh-aw/agent/pme-context.json
 
         echo "Context file written: $(wc -c < /tmp/gh-aw/agent/pme-context.json) bytes"
@@ -213,6 +268,9 @@ network:
     # host is unreachable; on self-hosted runners with VPN access it will also
     # enable future TFS REST API cross-referencing (v2).
     - "tfs.realpage.com"
+    # realpage.my.salesforce.com: prevents AWF from redacting Salesforce URLs
+    # in safe outputs (PME links in issue bodies).
+    - "realpage.my.salesforce.com"
 
 tools:
   github:
@@ -349,12 +407,51 @@ Read `/tmp/gh-aw/agent/pme-context.json`. This file was assembled by the pre-ste
 ```json
 {
   "run_params": { "product_filter": "...", "priority_filter": "...", "lookback_days": 30, "pme_limit": 25, "repo": "owner/repo" },
-  "sf_pmes": { "totalSize": N, "records": [ ... ] },
+  "sf_pmes": {
+    "totalSize": N,
+    "records": [
+      {
+        "Id": "a4PQU...", "Name": "PME-XXXXXX",
+        "Summary__c": "...", "Description__c": "...", "Issue_Summary__c": "...",
+        "Priority__c": "P2 - High", "Escalation_Status__c": "...",
+        "Accountable_Team__c": "...", "Responsible_Team__c": "...",
+        "Impacted_Products__c": "...", "Domain__c": "...",
+        "Functional_Area__c": "...", "Support_Product_Name__c": "...",
+        "Customer_Impact__c": "...", "Business_Impact__c": "...",
+        "Support_Impact__c": "...", "Support_Comments__c": "...",
+        "Latest_Comment__c": "...", "Current_PME_Update__c": "...",
+        "Escalation_Notes__c": "...", "Client_Update__c": "...",
+        "Steps_Support_has_attempted__c": "...", "Error_Message__c": "...",
+        "Resolution_Summary__c": "...", "Resolution_Type__c": "...", "Resolution_Status__c": "...",
+        "Code_Fix_Reason__c": "...", "Tags__c": "...",
+        "Case_Number__c": "...", "Related_PME__c": "...",
+        "Business_Days_Open__c": 45, "Reopen_Count__c": 0,
+        "Azure_DevOps_ID__c": "...", "Azure_DevOps_URL__c": "...",
+        "CreatedDate": "...", "LastModifiedDate": "..."
+      }
+    ]
+  },
   "gh_issues": [ { "number": 102, "title": "...", "body": "...", "createdAt": "...", "labels": [...] } ],
   "labels": { "pme-triage": true, "priority:high": true, "enhancement-backlog": false, ... },
-  "state": { "PME-500128": { "status": "tracked", "issue": 102, "sf_writeback": true }, ... }
+  "state": { "PME-500128": { "status": "tracked", "issue": 102, "sf_writeback": true }, ... },
+  "chatter": {
+    "<sf_id>": [
+      { "body": "...", "author": "Jane Doe", "created_date": "2026-04-01T12:00:00.000+0000", "parent_id": "<sf_id>" },
+      ...
+    ]
+  }
 }
 ```
+
+**Key fields for triage decisions:**
+- `Resolution_Type__c` — definitive WAD signal when = "Works as Designed"
+- `Customer_Impact__c`, `Business_Impact__c` — scope and business justification
+- `Latest_Comment__c`, `Current_PME_Update__c` — most recent status from PME owner
+- `Steps_Support_has_attempted__c`, `Error_Message__c` — investigation details
+- `Business_Days_Open__c` — use this for age instead of computing from `CreatedDate`
+- `Reopen_Count__c` — signal for recurring/unresolved issues
+- `Related_PME__c` — grouping signal for related PMEs
+- `chatter` — Chatter posts keyed by PME Salesforce ID; richest source of WAD signals and investigation context
 
 **If the file contains `sf_auth_error`**, Salesforce authentication failed. Create a GitHub issue using the `create-issue` safe output:
 
@@ -393,7 +490,7 @@ Then set `"sf_writeback": true` in the state entry.
 
 ### 3a: Group related PMEs
 
-Group untracked PMEs that likely refer to the same underlying issue by comparing `Summary__c`, `Description__c`, `Impacted_Products__c`, and `Accountable_Team__c`. When in doubt, do **not** group.
+Group untracked PMEs that likely refer to the same underlying issue by comparing `Summary__c`, `Description__c`, `Impacted_Products__c`, `Accountable_Team__c`, `Domain__c`, `Functional_Area__c`, and `Related_PME__c`. `Related_PME__c` is a strong grouping signal — PMEs that reference each other should be grouped. When in doubt, do **not** group.
 
 Classify each group:
 - **Enhancement group**: ALL PMEs have `Priority__c` starting with `P4` AND descriptions indicate feature requests (signals: "would be nice", "feature request", "enhancement", "ability to", "support for", "option to").
@@ -403,11 +500,13 @@ For enhancement groups, merge clusters sharing the same `Impacted_Products__c` o
 
 ### 3b: Score each group
 
-**Bug score** = `priority_weight × (1 + age_days / 30) × (1 + 0.25 × (group_size - 1))`
+Use `Business_Days_Open__c` for age (falls back to computing from `CreatedDate` if null).
 
-Priority weights: P1=4, P2=3, P3=2, P4=1, null/unknown=2.
+**Bug score** = `priority_weight × (1 + business_days_open / 30) × (1 + 0.25 × (group_size - 1)) × (1 + 0.1 × reopen_count)`
 
-**Enhancement score** = `cluster_size × (1 + age_days / 60) × product_area_weight`
+Priority weights: P1=4, P2=3, P3=2, P4=1, null/unknown=2. `reopen_count` = `Reopen_Count__c` (0 if null).
+
+**Enhancement score** = `cluster_size × (1 + business_days_open / 60) × product_area_weight`
 
 Where `product_area_weight` = 1.5 if all PMEs share the same `Impacted_Products__c`, else 1.0.
 
@@ -419,13 +518,20 @@ Output a ranked table before proceeding:
 
 ### 3c: WAD (Works As Designed) detection
 
-Check each group for WAD signals: "works as designed", "by design", "expected behavior", "not a bug", "confusing", "unintuitive" — or when support confirmed behavior is correct but customer is still impacted.
+Check each group for WAD signals using these sources, in order of strength:
+
+1. **Definitive:** `Resolution_Type__c == "Works as Designed"` → flag as WAD immediately.
+2. **Chatter:** Check `chatter[<sf_id>]` entries for phrases: "works as designed", "by design", "expected behavior", "not a bug", "working as intended".
+3. **Comment fields:** Check `Latest_Comment__c`, `Current_PME_Update__c`, `Support_Comments__c`, and `Escalation_Notes__c` for the same WAD phrases.
+4. **Summary/Description fallback:** Check `Summary__c` and `Description__c` for WAD phrases, plus UX signals: "confusing", "unintuitive" — or when support confirmed behavior is correct but customer is still impacted.
 
 Flag as `wad: true` only when there are strong WAD signals AND measurable customer impact. Record the current behavior, customer expectation, and impact.
 
 ## Step 4: Create GitHub Issues
 
 For each group of untracked PMEs, create **one issue per group** using `create-issue`.
+
+> **SF link format — mandatory:** Always use `[View](https://realpage.my.salesforce.com/{Id})` for Salesforce links. Never construct URLs any other way.
 
 ### Title formats
 
@@ -440,9 +546,28 @@ For each group of untracked PMEs, create **one issue per group** using `create-i
 {Summary__c or description of common issue for multi-PME groups}
 
 ## PMEs in this Issue
-| PME ID | Priority | Status | Created | Age | SF Link |
-|--------|----------|--------|---------|-----|---------|
-| {Name} | {Priority__c} | {Escalation_Status__c} | {CreatedDate} | {age} days | [View](https://realpage.my.salesforce.com/{Id}) |
+| PME ID | Priority | Status | Created | Days Open | SF Link |
+|--------|----------|--------|---------|-----------|---------|
+| {Name} | {Priority__c} | {Escalation_Status__c} | {CreatedDate} | {Business_Days_Open__c} | [View](https://realpage.my.salesforce.com/{Id}) |
+
+## Customer Impact
+{Customer_Impact__c — scope of customer impact}
+
+{Business_Impact__c — business justification, if available}
+
+## Investigation Status
+**Latest Comment:** {Latest_Comment__c}
+
+**Current PME Update:** {Current_PME_Update__c}
+
+**Chatter (most recent 3):**
+{For each of the 3 most recent entries in chatter[<sf_id>]: "> **{author}** ({created_date}): {body}"}
+
+## Steps Attempted
+{Steps_Support_has_attempted__c, or "No steps recorded."}
+
+## Error Details
+{Error_Message__c, or "No error message recorded."}
 
 ## Details
 {Description__c, or per-PME sub-headings for multi-PME groups}
@@ -456,6 +581,12 @@ For each group of untracked PMEs, create **one issue per group** using `create-i
 | **Accountable Team** | {Accountable_Team__c} |
 | **Responsible Team** | {Responsible_Team__c} |
 | **Impacted Products** | {Impacted_Products__c} |
+| **Domain** | {Domain__c} |
+| **Functional Area** | {Functional_Area__c} |
+| **Support Product** | {Support_Product_Name__c} |
+| **Case Number** | {Case_Number__c} |
+| **Business Days Open** | {Business_Days_Open__c} |
+| **Reopen Count** | {Reopen_Count__c} |
 | **Group Score** | {score} |
 
 ## Next Steps
@@ -474,11 +605,12 @@ For each group of untracked PMEs, create **one issue per group** using `create-i
 **Cluster size:** {N} PMEs | **Product area:** {Impacted_Products__c} | **Demand signal:** {N} escalations over {age_range} days
 
 ## PMEs in this Enhancement Cluster
-| PME ID | Summary | Created | Age | SF Link |
-|--------|---------|---------|-----|---------|
+| PME ID | Summary | Created | Days Open | SF Link |
+|--------|---------|---------|-----------|---------|
+| {Name} | {Summary__c} | {CreatedDate} | {Business_Days_Open__c} | [View](https://realpage.my.salesforce.com/{Id}) |
 
 ## Individual Requests
-{Per-PME sub-headings with Description__c}
+{Per-PME sub-headings with Description__c and Customer_Impact__c}
 
 ## Existing Work Items
 {TFS links or "No existing TFS work items linked."}
@@ -488,9 +620,11 @@ For each group of untracked PMEs, create **one issue per group** using `create-i
 |-------|-------|
 | **Accountable Team** | {Accountable_Team__c} |
 | **Impacted Products** | {Impacted_Products__c} |
+| **Domain** | {Domain__c} |
+| **Functional Area** | {Functional_Area__c} |
 | **Enhancement Score** | {score} |
 | **Cluster Size** | {N} PMEs |
-| **Oldest Request** | {oldest CreatedDate} ({age} days ago) |
+| **Oldest Request** | {oldest CreatedDate} ({Business_Days_Open__c} business days) |
 
 ## Next Steps
 - [ ] Review enhancement requests and assess product fit
