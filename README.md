@@ -59,15 +59,17 @@ gh aw trial RealPage/agentic-workflows/workflows/agent-review-pr.md@v0.3.0
 
 This triggers a single run against your repo without adding any workflow files. It's the safest way to evaluate whether a workflow is useful on your codebase before installing it permanently.
 
+> **Note:** `gh aw trial` works well for self-contained workflows like `agent-review-pr`. Workflows that require secrets (API keys, OAuth tokens) will fail in trial mode because the temporary trial repo has no secrets configured. For those, install the workflow in a repo that already has the required secrets.
+
 ---
 
 ## The Five Golden Workflows
 
-Once Path A or Path B has proven the shape works, here's the full set we recommend for developer-facing day-to-day work. Each one is label-triggered, scoped to one specific job, and designed to be safe to retry.
+Once Path A or Path B has proven the shape works, here's the full set we recommend for developer-facing day-to-day work. Most are label-triggered; `agent-review-pr` runs automatically on every PR. Each is scoped to one specific job and designed to be safe to retry.
 
 | # | Workflow | Trigger | What it does | Blast radius |
 |---|---|---|---|---|
-| 1 | [`agent-review-pr`](workflows/agent-review-pr.md) | PR opened | Inline review comments + 1-5 scores on correctness, security, patterns | **Comments only** — cannot modify code |
+| 1 | [`agent-review-pr`](workflows/agent-review-pr.md) | PR opened (automatic, no label) | Inline review comments + 1-5 scores on correctness, security, patterns | **Comments only** — cannot modify code |
 | 2 | [`agent-generate-tests`](workflows/agent-generate-tests.md) | PR labeled `agent:tests` | Writes tests for the PR's new behavior; pushes commits back to the branch | Tests only — never edits source |
 | 3 | [`agent-refactor`](workflows/agent-refactor.md) | Issue or PR labeled `agent:refactor` | Behavior-preserving refactor of one area per run | Opens a PR; no API changes, no deps changes |
 | 4 | [`implement-issue`](workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, writes code + tests, opens a PR with self-review | Opens a PR; human reviews before merge |
