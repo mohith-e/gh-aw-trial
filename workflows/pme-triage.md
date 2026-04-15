@@ -108,71 +108,50 @@ on:
         #──────────────────────────────────────────────
         # 2.5. Fetch Chatter for PME records
         #──────────────────────────────────────────────
-        # Uses the Composite + Chatter Connect REST API instead of SOQL on
-        # FeedItem, which has org-level query restrictions in many SF orgs
-        # ("FeedItem requires a filter by Id").
+        # Uses the Chatter Connect REST API per-PME (not SOQL on FeedItem,
+        # which is blocked in many SF orgs, and not the Composite API, which
+        # returns 404 for Chatter Connect endpoints).
         echo "::group::Chatter fetch"
         if [ "$PME_COUNT" -eq 0 ]; then
           echo "No PMEs — skipping Chatter fetch."
           echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
         else
-          # Build a Composite API request — one Chatter feed-elements
-          # subrequest per PME, batched into a single HTTP call.
-          echo "$SF_RESULT" | jq '{
-            compositeRequest: [.records[].Id as $id | {
-              method: "GET",
-              url: ("/services/data/v62.0/chatter/feeds/record/" + $id + "/feed-elements?pageSize=5"),
-              referenceId: $id
-            }]
-          }' > /tmp/gh-aw/agent/chatter-request.json
-          echo "Fetching Chatter for $PME_COUNT PME(s) via Composite API..."
-          CHATTER_ERR=$(mktemp)
-          CHATTER_RESULT=$(curl -s -X POST "https://realpage.my.salesforce.com/services/data/v62.0/composite" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @/tmp/gh-aw/agent/chatter-request.json 2>"$CHATTER_ERR") || true
-          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq -e '.compositeResponse' > /dev/null 2>&1; then
-            echo "::warning::Chatter fetch failed: $(cat "$CHATTER_ERR") $(echo "$CHATTER_RESULT" | head -c 500)"
-            echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
-          else
-            # Transform Composite response into {pme_sf_id: [{body, author, created_date, type}]}
-            # Extracts both top-level posts and nested comment replies.
-            echo "$CHATTER_RESULT" | jq '
-              [.compositeResponse[]
-                | select(.httpStatusCode == 200)
-                | .referenceId as $pid
-                | (.body.elements // [])[]
+          echo "Fetching Chatter for $PME_COUNT PME(s) via Chatter Connect REST API..."
+          echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
+          CHATTER_TOTAL=0
+          CHATTER_PME_COUNT=0
+          for PME_ID in $(echo "$SF_RESULT" | jq -r '.records[].Id'); do
+            FEED=$(curl -s "https://realpage.my.salesforce.com/services/data/v62.0/chatter/feeds/record/${PME_ID}/feed-elements?pageSize=10" \
+              -H "Authorization: Bearer $TOKEN" 2>/dev/null) || true
+            if [ -z "$FEED" ] || ! echo "$FEED" | jq -e '.elements' > /dev/null 2>&1; then
+              continue
+            fi
+            # Extract TextPost bodies + nested comment replies, skip TrackedChange/null entries
+            ENTRIES=$(echo "$FEED" | jq --arg pid "$PME_ID" '
+              [.elements[]
+                | select(.type == "TextPost" and .body.text != null)
                 | (
-                    # Top-level post
-                    {
-                      body: .body.text,
-                      author: .actor.displayName,
-                      created_date: .createdDate,
-                      type: "post",
-                      parent_id: $pid
-                    }
+                    {body: .body.text, author: .actor.displayName, created_date: .createdDate, type: "post", parent_id: $pid}
                   ),
                   (
-                    # Nested comment replies
                     (.capabilities.comments.page.items // [])[]
-                    | {
-                        body: .body.text,
-                        author: .actor.displayName,
-                        created_date: .createdDate,
-                        type: "comment",
-                        parent_id: $pid
-                      }
+                    | select(.body.text != null)
+                    | {body: .body.text, author: .actor.displayName, created_date: .createdDate, type: "comment", parent_id: $pid}
                   )
-              ]
-              | group_by(.parent_id)
-              | map({key: .[0].parent_id, value: (. | sort_by(.created_date) | reverse)})
-              | from_entries
-            ' > /tmp/gh-aw/agent/chatter-by-pme.json
-            CHATTER_PME_COUNT=$(jq 'keys | length' /tmp/gh-aw/agent/chatter-by-pme.json)
-            CHATTER_TOTAL=$(jq '[.[] | length] | add // 0' /tmp/gh-aw/agent/chatter-by-pme.json)
-            echo "Fetched $CHATTER_TOTAL Chatter post(s) across $CHATTER_PME_COUNT PME(s)."
-          fi
-          rm -f "$CHATTER_ERR" /tmp/gh-aw/agent/chatter-request.json
+              ] | sort_by(.created_date) | reverse
+            ') || true
+            ENTRY_COUNT=$(echo "$ENTRIES" | jq 'length' 2>/dev/null || echo 0)
+            if [ "$ENTRY_COUNT" -gt 0 ]; then
+              # Merge into the chatter-by-pme JSON file
+              jq --arg pid "$PME_ID" --argjson entries "$ENTRIES" \
+                '. + {($pid): $entries}' /tmp/gh-aw/agent/chatter-by-pme.json \
+                > /tmp/gh-aw/agent/chatter-by-pme.tmp && \
+                mv /tmp/gh-aw/agent/chatter-by-pme.tmp /tmp/gh-aw/agent/chatter-by-pme.json
+              CHATTER_TOTAL=$((CHATTER_TOTAL + ENTRY_COUNT))
+              CHATTER_PME_COUNT=$((CHATTER_PME_COUNT + 1))
+            fi
+          done
+          echo "Fetched $CHATTER_TOTAL Chatter post(s) across $CHATTER_PME_COUNT PME(s)."
         fi
         echo "::endgroup::"
 
