@@ -106,44 +106,57 @@ on:
         echo "::endgroup::"
 
         #──────────────────────────────────────────────
-        # 2.5. Fetch Chatter (FeedItem) for PME records
+        # 2.5. Fetch Chatter for PME records
         #──────────────────────────────────────────────
+        # Uses the Composite + Chatter Connect REST API instead of SOQL on
+        # FeedItem, which has org-level query restrictions in many SF orgs
+        # ("FeedItem requires a filter by Id").
         echo "::group::Chatter fetch"
         if [ "$PME_COUNT" -eq 0 ]; then
           echo "No PMEs — skipping Chatter fetch."
           echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
         else
-          IN_CLAUSE=$(echo "$SF_RESULT" | jq -r '
-            [.records[].Id]
-            | map("\u0027" + . + "\u0027")
-            | join(",")
-          ')
-          CHATTER_QUERY="SELECT Id, Body, CreatedDate, CreatedBy.Name, ParentId FROM FeedItem WHERE ParentId IN (${IN_CLAUSE}) ORDER BY CreatedDate DESC LIMIT 100"
-          echo "Chatter query: $CHATTER_QUERY"
+          # Build a Composite API request — one Chatter feed-elements
+          # subrequest per PME, batched into a single HTTP call.
+          echo "$SF_RESULT" | jq '{
+            compositeRequest: [.records[].Id as $id | {
+              method: "GET",
+              url: ("/services/data/v62.0/chatter/feeds/record/" + $id + "/feed-elements?pageSize=5"),
+              referenceId: $id
+            }]
+          }' > /tmp/gh-aw/agent/chatter-request.json
+          echo "Fetching Chatter for $PME_COUNT PME(s) via Composite API..."
           CHATTER_ERR=$(mktemp)
-          CHATTER_RESULT=$(curl -s -G "https://realpage.my.salesforce.com/services/data/v62.0/query" \
+          CHATTER_RESULT=$(curl -s -X POST "https://realpage.my.salesforce.com/services/data/v62.0/composite" \
             -H "Authorization: Bearer $TOKEN" \
-            --data-urlencode "q=$CHATTER_QUERY" 2>"$CHATTER_ERR") || true
-          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq -e '.totalSize' > /dev/null 2>&1; then
-            echo "::warning::Chatter fetch failed or returned error: $(cat "$CHATTER_ERR") $(echo "$CHATTER_RESULT" | head -c 500)"
+            -H "Content-Type: application/json" \
+            -d @/tmp/gh-aw/agent/chatter-request.json 2>"$CHATTER_ERR") || true
+          if [ -z "$CHATTER_RESULT" ] || ! echo "$CHATTER_RESULT" | jq -e '.compositeResponse' > /dev/null 2>&1; then
+            echo "::warning::Chatter fetch failed: $(cat "$CHATTER_ERR") $(echo "$CHATTER_RESULT" | head -c 500)"
             echo '{}' > /tmp/gh-aw/agent/chatter-by-pme.json
           else
-            CHATTER_COUNT=$(echo "$CHATTER_RESULT" | jq '.totalSize')
-            echo "Fetched $CHATTER_COUNT Chatter post(s)."
+            # Transform Composite response into {pme_sf_id: [{body, author, created_date}]}
             echo "$CHATTER_RESULT" | jq '
-              .records
-              | map({
-                  body: .Body,
-                  author: .CreatedBy.Name,
-                  created_date: .CreatedDate,
-                  parent_id: .ParentId
-                })
+              [.compositeResponse[]
+                | select(.httpStatusCode == 200)
+                | .referenceId as $pid
+                | (.body.elements // [])[]
+                | {
+                    body: .body.text,
+                    author: .actor.displayName,
+                    created_date: .createdDate,
+                    parent_id: $pid
+                  }
+              ]
               | group_by(.parent_id)
               | map({key: .[0].parent_id, value: .})
               | from_entries
             ' > /tmp/gh-aw/agent/chatter-by-pme.json
+            CHATTER_PME_COUNT=$(jq 'keys | length' /tmp/gh-aw/agent/chatter-by-pme.json)
+            CHATTER_TOTAL=$(jq '[.[] | length] | add // 0' /tmp/gh-aw/agent/chatter-by-pme.json)
+            echo "Fetched $CHATTER_TOTAL Chatter post(s) across $CHATTER_PME_COUNT PME(s)."
           fi
-          rm -f "$CHATTER_ERR"
+          rm -f "$CHATTER_ERR" /tmp/gh-aw/agent/chatter-request.json
         fi
         echo "::endgroup::"
 
