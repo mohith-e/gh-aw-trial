@@ -200,6 +200,20 @@ gh aw add-wizard RealPage/agentic-workflows/workflows/auto-remediation.md@v0.3.0
 
 ---
 
+## Sharing Your Own Workflows
+
+If you've written a gh-aw workflow that's useful beyond a single repo, the right place to publish it depends on who you want to be able to install it. Three tiers, parallel to (but distinct from) the [plugin tiers](https://github.com/RealPage/ai-marketplace/blob/main/docs/PLUGIN_DESIGN.md) — workflows are gh-aw artifacts and aren't registered in `ai-marketplace`.
+
+| Audience | Where the workflow lives | How others install it |
+|----------|--------------------------|----------------------|
+| **Just your repo** | `.github/workflows/<name>.md` committed to the repo | Already installed — it just runs |
+| **Your team / a subset of teams** | A workflow library repo your team owns (e.g. `MyTeam/our-agentic-workflows`), hosted anywhere your audience can fetch from | `gh aw add MyTeam/our-agentic-workflows/workflows/<name>.md@<tag>` |
+| **All of RealPage** | Contributed to **this** repo (`RealPage/agentic-workflows`) | `gh aw add RealPage/agentic-workflows/workflows/<name>.md@<tag>` |
+
+**Hosting requirement at the all-of-RealPage tier:** because every consumer fetches the workflow source via `gh aw add`, the host repo must be reachable by every RP engineer. That's what locks Tier 3 to the `RealPage` GitHub org. A team-internal workflow library on a private team org is fine — it just stops at Tier 2.
+
+---
+
 ## Contributing
 
 Want to improve these workflows for everyone?
