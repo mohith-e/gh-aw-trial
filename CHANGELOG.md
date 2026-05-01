@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/RealPage/agentic-workflows/compare/v0.3.1...v0.4.0) (2026-04-29)
+
+
+### Features
+
+* **pme-triage:** expand SF context with Chatter, comment fields, and fix issue quality ([#55](https://github.com/RealPage/agentic-workflows/issues/55)) ([fe58de4](https://github.com/RealPage/agentic-workflows/commit/fe58de45b510a61e7bb0141665b7c2840f04e038)), closes [#53](https://github.com/RealPage/agentic-workflows/issues/53)
+
+
+### Bug Fixes
+
+* **pme-triage:** handle SF error array in Chatter response validation ([#57](https://github.com/RealPage/agentic-workflows/issues/57)) ([9f1c3cd](https://github.com/RealPage/agentic-workflows/commit/9f1c3cd4f1820e5e05103ccefe3e455fed270326))
+* **pme-triage:** include nested comment replies in Chatter extraction ([#59](https://github.com/RealPage/agentic-workflows/issues/59)) ([ab061a3](https://github.com/RealPage/agentic-workflows/commit/ab061a317b2e1b9aeda0d382629a65b0f8a409b5))
+* **pme-triage:** inline Chatter via Feeds subquery, eliminate N+1 API calls ([#61](https://github.com/RealPage/agentic-workflows/issues/61)) ([fa12868](https://github.com/RealPage/agentic-workflows/commit/fa1286872cbad13dd06107df2e9376949d0ad154))
+* **pme-triage:** use Composite + Chatter REST API instead of SOQL on FeedItem ([#58](https://github.com/RealPage/agentic-workflows/issues/58)) ([10f39a5](https://github.com/RealPage/agentic-workflows/commit/10f39a5369c32d916cbb0d1b96a8bc9883e9368f))
+* **pme-triage:** use per-PME Chatter Connect REST API for feed fetch ([#60](https://github.com/RealPage/agentic-workflows/issues/60)) ([ceef119](https://github.com/RealPage/agentic-workflows/commit/ceef1190204161b22297986b5328f04f5127c276))
+
 ## [0.3.1](https://github.com/RealPage/agentic-workflows/compare/v0.3.0...v0.3.1) (2026-04-14)
 
 
