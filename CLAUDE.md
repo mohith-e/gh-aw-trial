@@ -54,6 +54,7 @@ The markdown body contains natural language instructions that Claude agents foll
 | `fix-failing-tests` | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review. Pairs with upstream `pr-fix` (open PRs) and `ci-doctor` (diagnosis only) |
 | `agent-refactor` | Issue or PR labeled `agent:refactor` | Developer-directed, behavior-preserving refactor of one area per run. Modes: targeted (area in issue body), sweep (agent picks an area), PR (refactor the PR's diff) |
 | `agent-review-pr` | PR opened or reopened | Auto AI code review — analyzes the diff for correctness, security, and repo patterns; leaves up to 8 inline comments and submits one summary review with a per-dimension score |
+| `tfs-implement` | Every 15 min off-hour / manual with work item ID | Implements one Azure DevOps (TFS) work item per run — claims via tag state machine, clones the TFS repo, writes code in an `agent/wi-*` branch, pushes back to TFS, and opens a PR in TFS with a self-review. Reusable across teams; configure via repo variables |
 
 ## How Consumer Repos Use This
 
@@ -99,4 +100,5 @@ Key commands:
 - Workflows assume consumer repos have a `CLAUDE.md` describing their project context and a PRD template at `docs/prds/templates/prd-template.md`.
 - The `auto-remediation` workflow requires `SERVICE_NAME` variable, `ELASTIC_MCP_URL` variable, and `ELASTIC_MCP_API_KEY` secret in the consumer repo.
 - The `pme-triage` workflow requires `SF_OAUTH_CLIENT_ID` variable and `SF_OAUTH_SECRET` secret in the consumer repo (Salesforce Connected App credentials for `pmeautomation@realpage.com`).
+- The `tfs-implement` workflow requires variables `TFS_BASE`, `TFS_PROJECT`, `TFS_TEAM_AREA_PATH`, `TFS_REPO`, `TFS_TARGET_BRANCH` plus secrets `TFS_PAT` and `ANTHROPIC_API_KEY` in the consumer repo. Defaults assume `tfs.realpage.com`; consumers on a different TFS / Azure DevOps host must override `network.allowed` in their stub. The workflow uses a three-phase architecture: a deterministic pre-agent step claims/clones (PAT scoped), the agent edits and emits a format-patch (no PAT), and safe-output handler jobs `tfs-finalize-pull-request` / `tfs-record-failure` mediate all TFS writes — so `strict: true` and the agent prompt has no TFS REST calls.
 - `implementation.md` is intentionally NOT shared — it is project-specific and lives only in consumer repos.
