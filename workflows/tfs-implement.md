@@ -228,6 +228,11 @@ steps:
       BRANCH="agent/wi-${WI_ID}-${SLUG}"
 
       # ---------- 4. GitHub clone (cheap) + incremental TFS fetch ----------
+      # NOTE: the mirror-probe / clone-or-fallback / fetch-tfs logic below is
+      # duplicated in the tfs-finalize-pull-request handler (search "Probe the
+      # mirror ref"). They run in separate jobs on separate runners, so they
+      # cannot share a sourced file without breaking this workflow's single-file
+      # portability. Keep the two blocks in sync when editing either.
       # Instead of a full clone from TFS, start from the GitHub mirror that
       # .github/workflows/tfs-mirror.yml maintains every 10 minutes at
       # refs/heads/tfs-mirror/<branch>, then fetch only the delta from TFS.
@@ -483,6 +488,8 @@ safe-outputs:
             # Probe the mirror ref (see claim step). If present, clone it;
             # otherwise fall back to a no-checkout GitHub clone and let the
             # TFS fetch below transfer full history.
+            # NOTE: kept in sync with the matching clone block in the claim
+            # step ("GitHub clone (cheap) + incremental TFS fetch"). Edit both.
             if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
                    ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
               git -c "http.https://github.com/.extraheader=$GH_AUTH" \
