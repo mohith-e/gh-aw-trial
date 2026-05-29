@@ -26,6 +26,15 @@ engine: claude
 
 strict: true
 
+# Companion files fetched alongside this workflow by `gh aw add`, pinned to the
+# same ref. `tfs-mirror.yml` is plain GitHub Actions YAML (no agent, no compile)
+# that keeps a GitHub-side mirror of the TFS repo fresh so this workflow clones
+# a small delta instead of the whole TFS repo each run. Installing it via
+# `resources:` means consumers run a single `gh aw add` instead of a separate
+# curl to copy the mirror. See `tfs-mirror.yml` for the why.
+resources:
+  - tfs-mirror.yml
+
 permissions: read-all
 
 # ── Network allow-list ────────────────────────────────────────────────────────
