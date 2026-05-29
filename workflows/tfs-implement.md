@@ -1,19 +1,17 @@
 ---
 description: |
   TFS (Azure DevOps) work item implementer. Polls a team's work item queue,
-  claims one item via a tag state machine, clones the TFS git repo (via the
-  GitHub mirror for speed, falling back to direct TFS), lets the agent write
-  code and produce a format-patch (without TFS credentials), and then
-  mediates all TFS writes (push, PR open, PR review notes, work item state)
-  through safe-output handler jobs. Pairs with `tfs-mirror.yml` for the
-  optimized clone path. Reusable across teams; configure per-team values via
-  repo variables — see the verify step below for the authoritative list.
+  claims one item via a tag state machine, shallow-clones the target branch
+  from the TFS git repo, lets the agent write code and produce a format-patch
+  (without TFS credentials), and then mediates all TFS writes (push, PR open,
+  PR review notes, work item state) through safe-output handler jobs. Reusable
+  across teams; configure per-team values via repo variables — see the verify
+  step below for the authoritative list.
 
 on:
   schedule:
-    # Off-the-hour minutes (7,22,37,52) staggered against tfs-mirror's
-    # 3/13/23/33/43/53 schedule. GitHub Actions throttles workflows
-    # firing on common boundaries like :00, :10, :15.
+    # Off-the-hour minutes (7,22,37,52): GitHub Actions throttles workflows
+    # firing on common boundaries like :00, :10, :15, so avoid them.
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
@@ -25,15 +23,6 @@ on:
 engine: claude
 
 strict: true
-
-# Companion files fetched alongside this workflow by `gh aw add`, pinned to the
-# same ref. `tfs-mirror.yml` is plain GitHub Actions YAML (no agent, no compile)
-# that keeps a GitHub-side mirror of the TFS repo fresh so this workflow clones
-# a small delta instead of the whole TFS repo each run. Installing it via
-# `resources:` means consumers run a single `gh aw add` instead of a separate
-# curl to copy the mirror. See `tfs-mirror.yml` for the why.
-resources:
-  - tfs-mirror.yml
 
 permissions: read-all
 
@@ -165,12 +154,6 @@ steps:
     id: claim
     env:
       TFS_PAT: ${{ secrets.TFS_PAT }}
-      # GITHUB_TOKEN is the auto-injected per-run Actions token. With the
-      # workflow's `permissions: read-all`, it has `contents: read` — enough
-      # to clone this internal repo from GitHub. Bound here (not at workflow
-      # level) for parity with TFS_PAT scoping. The agent step is invoked
-      # separately and gh-aw controls what lands in its docker env.
-      GITHUB_TOKEN: ${{ github.token }}
     run: |
       set -euo pipefail
       TFS_B64="$(printf ':%s' "$TFS_PAT" | base64 -w0)"
@@ -227,50 +210,25 @@ steps:
         | cut -c1-40)
       BRANCH="agent/wi-${WI_ID}-${SLUG}"
 
-      # ---------- 4. GitHub clone (cheap) + incremental TFS fetch ----------
-      # NOTE: the mirror-probe / clone-or-fallback / fetch-tfs logic below is
-      # duplicated in the tfs-finalize-pull-request handler (search "Probe the
-      # mirror ref"). They run in separate jobs on separate runners, so they
-      # cannot share a sourced file without breaking this workflow's single-file
-      # portability. Keep the two blocks in sync when editing either.
-      # Instead of a full clone from TFS, start from the GitHub mirror that
-      # .github/workflows/tfs-mirror.yml maintains every 10 minutes at
-      # refs/heads/tfs-mirror/<branch>, then fetch only the delta from TFS.
-      # GitHub-side history is already close to current; the TFS fetch
-      # below transfers at most ~10 min of commits.
-      GH_REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
-      MIRROR_BRANCH="tfs-mirror/${TFS_TARGET_BRANCH}"
-      # GitHub's git smart-HTTP endpoint authenticates via Basic auth with
-      # `x-access-token` as the username and the token as the password —
-      # same shape as TFS_PAT above, different username. Bearer tokens are
-      # not accepted by the git endpoint (only by the REST API).
-      GH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
-      GH_AUTH="Authorization: Basic $GH_B64"
-
-      # Probe the mirror ref directly. Lets us distinguish "mirror branch
-      # missing" (expected on bootstrap) from "auth failed" (a real bug we
-      # want to see, not swallow with `2>/dev/null` on the clone). Output
-      # from ls-remote is discarded but exit status tells us what we need.
-      if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-             ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
-        git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-            clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$TFS_WORK"
-      else
-        echo "Mirror branch $MIRROR_BRANCH not present on GitHub yet — falling back to full TFS fetch."
-        git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-            clone --no-checkout --depth=1 "$GH_REPO_URL" "$TFS_WORK"
-      fi
+      # ---------- 4. Shallow direct clone of the target branch from TFS ----------
+      # The agent edits files and produces a one-commit format-patch, so it
+      # needs the working tree, not history. A `--depth=1 --single-branch`
+      # clone of just the target branch keeps the transfer bounded to that
+      # branch's tip tree regardless of how much history the TFS repo carries.
+      # The auth header is passed one-shot via `-c` (git does NOT persist a
+      # `-c` value into the new repo's config) and unset defensively afterward,
+      # so the agent has no stored credential and literally cannot push.
+      #
+      # NOTE: the finalize handler clones the target branch independently
+      # (search "Clone the target branch from TFS") with its own PAT scope and
+      # FULL history so it can branch from base_sha. That second clone is a
+      # deliberate security boundary, not duplication to factor out — keep the
+      # auth handling consistent between the two.
+      git -c "http.https://${TFS_HOST}/.extraheader=$TFS_AUTH" \
+          clone --depth=1 --single-branch --branch "$TFS_TARGET_BRANCH" \
+          "$TFS_BASE/_git/$TFS_REPO" "$TFS_WORK"
       git -C "$TFS_WORK" config user.email "agent-bot@noreply.local"
       git -C "$TFS_WORK" config user.name "tfs-implement"
-
-      # Fetch the target branch from TFS to pick up any commits that landed
-      # after the mirror cron last ran. Incremental — the GitHub clone above
-      # already has the bulk of history (unless we hit the fallback).
-      # Explicit refspec so `rev-parse tfs/$TFS_TARGET_BRANCH` below works
-      # without relying on the remote's configured fetch refspec.
-      git -C "$TFS_WORK" remote add tfs "$TFS_BASE/_git/$TFS_REPO"
-      git -C "$TFS_WORK" -c "http.https://${TFS_HOST}/.extraheader=$TFS_AUTH" \
-          fetch tfs "+refs/heads/${TFS_TARGET_BRANCH}:refs/remotes/tfs/${TFS_TARGET_BRANCH}"
 
       # Snapshot the target-branch tip BEFORE the agent makes any changes. The
       # finalize handler will branch from this exact SHA so a patch produced
@@ -278,15 +236,15 @@ steps:
       # moves during the run. If it moved, TFS surfaces the PR as "behind
       # main" — same UX as a stale human PR — rather than the handler failing
       # `git am` and leaving the work item stuck in agent-in-progress.
-      BASE_SHA=$(git -C "$TFS_WORK" rev-parse "tfs/$TFS_TARGET_BRANCH")
-      git -C "$TFS_WORK" checkout -b "$BRANCH" "$BASE_SHA"
+      # HEAD already is the target tip we just cloned, so branch straight off it.
+      BASE_SHA=$(git -C "$TFS_WORK" rev-parse HEAD)
+      git -C "$TFS_WORK" checkout -b "$BRANCH"
 
-      # CRITICAL: drop credential headers so the agent cannot push to either
-      # remote. Both headers were set via `-c` (one-shot, not persisted), but
+      # CRITICAL: drop the credential header so the agent cannot push to TFS.
+      # The clone used a one-shot `-c` header that git does not persist, but
       # unset defensively. Push to TFS is mediated by the safe-output handler
       # that has its own PAT scope.
       git -C "$TFS_WORK" config --local --unset "http.https://${TFS_HOST}/.extraheader" || true
-      git -C "$TFS_WORK" config --local --unset "http.https://github.com/.extraheader" || true
 
       # ---------- 5. Sanitize untrusted WI fields, then persist for the agent ----------
       # TFS work item content is untrusted user input — title, description,
@@ -377,11 +335,12 @@ safe-outputs:
           required: true
           description: "Body of the PR review-notes thread (markdown). Posted as a comment thread on the TFS PR for the human reviewer — explains what changed, what was tested, confidence, and what to double-check."
       runs-on: ubuntu-latest
-      # gh-aw safe-output handler jobs default to `permissions: {}` (no
-      # scopes), which makes GITHUB_TOKEN unable to even read this repo —
-      # GitHub returns "Repository not found" rather than revealing it
-      # exists. We need `contents: read` so the GitHub clone below works;
-      # the TFS write goes via TFS_PAT, not this token, so read is enough.
+      # gh-aw safe-output handler jobs default to `permissions: {}` (no scopes).
+      # This handler no longer clones the GitHub repo — it clones the target
+      # branch straight from TFS via TFS_PAT — but `contents: read` is retained
+      # conservatively so gh-aw's agent-artifact download (which carries the
+      # format-patch this job consumes) is not starved of scope. The TFS write
+      # goes via TFS_PAT, never this token.
       permissions:
         contents: read
       env:
@@ -389,8 +348,6 @@ safe-outputs:
         TFS_BASE: ${{ vars.TFS_BASE }}
         TFS_TARGET_BRANCH: ${{ vars.TFS_TARGET_BRANCH }}
         TFS_REPO: ${{ vars.TFS_REPO }}
-        # GITHUB_TOKEN scope is controlled by the `permissions:` block above.
-        GITHUB_TOKEN: ${{ github.token }}
       steps:
         # gh-aw v0.76.x emits `if: (!cancelled()) && ...` on custom safe-output
         # jobs, which overrides GitHub Actions' default needs-success gating.
@@ -466,9 +423,9 @@ safe-outputs:
             # format-patch file in its artifact. gh-aw bundles the agent's
             # /tmp/gh-aw/agent/ tree into the artifact, so the patch the agent
             # wrote to /tmp/gh-aw/agent/aw-tfs-wi-<id>.patch lands at
-            # safe-jobs/agent/aw-tfs-wi-<id>.patch after download. We clone
-            # the GitHub mirror, fetch the TFS delta, git-am the patch on top
-            # of the snapshotted base, and push the branch back to TFS.
+            # safe-jobs/agent/aw-tfs-wi-<id>.patch after download. We clone the
+            # target branch fresh from TFS, git-am the patch on top of the
+            # snapshotted base, and push the branch back to TFS.
             PATCH_FILE="${{ runner.temp }}/gh-aw/safe-jobs/agent/aw-tfs-wi-${WI_ID}.patch"
             if [ ! -f "$PATCH_FILE" ]; then
               echo "ERROR: expected patch file at $PATCH_FILE was not in the agent artifact." >&2
@@ -479,44 +436,30 @@ safe-outputs:
 
             PUSH_STAGING="${{ runner.temp }}/push-staging"
             TFS_HOST="${TFS_BASE#*://}"; TFS_HOST="${TFS_HOST%%/*}"
-            GH_REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
-            MIRROR_BRANCH="tfs-mirror/${TFS_TARGET_BRANCH}"
-            # See claim step for why Basic auth (not Bearer) is required.
-            GH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
-            GH_AUTH="Authorization: Basic $GH_B64"
 
-            # Probe the mirror ref (see claim step). If present, clone it;
-            # otherwise fall back to a no-checkout GitHub clone and let the
-            # TFS fetch below transfer full history.
-            # NOTE: kept in sync with the matching clone block in the claim
-            # step ("GitHub clone (cheap) + incremental TFS fetch"). Edit both.
-            if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-                   ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
-              git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-                  clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$PUSH_STAGING"
-            else
-              echo "Mirror branch $MIRROR_BRANCH not present on GitHub yet — falling back to full TFS fetch."
-              git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-                  clone --no-checkout --depth=1 "$GH_REPO_URL" "$PUSH_STAGING"
-            fi
+            # Clone the target branch from TFS. Unlike the agent's claim-step
+            # clone (shallow — it only needed a working tree), this clone keeps
+            # FULL history: we must branch from base_sha, the tip the agent
+            # snapshotted, and base_sha is an ancestor of the current target
+            # tip (the branch only advances under branch protection), so a
+            # full single-branch clone is guaranteed to contain it. A shallow
+            # clone could miss base_sha if the target moved during the run.
+            # The auth header is passed one-shot via `-c` for the clone, then
+            # persisted because the fetch/push below reuse it. The remote is
+            # renamed origin -> tfs so the existing `tfs/...` / `push tfs`
+            # references downstream keep working unchanged.
+            git -c "http.https://${TFS_HOST}/.extraheader=$TFS_AUTH" \
+                clone --single-branch --branch "$TFS_TARGET_BRANCH" \
+                "$TFS_BASE/_git/$TFS_REPO" "$PUSH_STAGING"
+            git -C "$PUSH_STAGING" remote rename origin tfs
+            git -C "$PUSH_STAGING" config --local "http.https://${TFS_HOST}/.extraheader" "$TFS_AUTH"
             git -C "$PUSH_STAGING" config user.email "agent-bot@noreply.local"
             git -C "$PUSH_STAGING" config user.name  "tfs-implement"
-
-            # Add TFS as a remote and fetch the target branch. The extraheader
-            # is persisted (not `-c` one-shot) because the final `git push tfs`
-            # below needs it too. Explicit refspec so the ancestry check
-            # against `tfs/$TFS_TARGET_BRANCH` below works without relying on
-            # the remote's configured fetch refspec.
-            git -C "$PUSH_STAGING" remote add tfs "$TFS_BASE/_git/$TFS_REPO"
-            git -C "$PUSH_STAGING" config --local "http.https://${TFS_HOST}/.extraheader" "$TFS_AUTH"
-            git -C "$PUSH_STAGING" fetch tfs "+refs/heads/${TFS_TARGET_BRANCH}:refs/remotes/tfs/${TFS_TARGET_BRANCH}"
 
             # Verify base_sha is reachable from the target branch. Defense
             # against an intent that supplies an arbitrary commit not part of
             # the project's history — e.g., from a different branch. The TFS
-            # tip lives at `tfs/$TFS_TARGET_BRANCH` after the fetch above;
-            # `origin/*` would be the GitHub mirror, which can lag by up to
-            # ~10 min and is not authoritative here.
+            # tip lives at `tfs/$TFS_TARGET_BRANCH` (the renamed clone remote).
             if ! git -C "$PUSH_STAGING" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
               echo "ERROR: base_sha $BASE_SHA is not present in the cloned $TFS_TARGET_BRANCH history." >&2
               exit 1
