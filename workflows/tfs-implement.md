@@ -1,18 +1,17 @@
 ---
 description: |
   TFS (Azure DevOps) work item implementer. Polls a team's work item queue,
-  claims one item via a tag state machine, clones the TFS git repo, lets the
-  agent write code and produce a format-patch (without TFS credentials), and
-      then mediates all TFS writes (push, PR open, PR review notes, work item
-  state) through safe-output handler jobs. Reusable across teams; configure
-  per-team values via repo variables — see the verify step below for the
-  authoritative list.
+  claims one item via a tag state machine, shallow-clones the target branch
+  from the TFS git repo, lets the agent write code and produce a format-patch
+  (without TFS credentials), and then mediates all TFS writes (push, PR open,
+  PR review notes, work item state) through safe-output handler jobs. Reusable
+  across teams; configure per-team values via repo variables — see the verify
+  step below for the authoritative list.
 
 on:
   schedule:
-    # Off-the-hour minutes (7,22,37,52) staggered against tfs-mirror's
-    # 3/13/23/33/43/53 schedule. GitHub Actions throttles workflows
-    # firing on common boundaries like :00, :10, :15.
+    # Off-the-hour minutes (7,22,37,52): GitHub Actions throttles workflows
+    # firing on common boundaries like :00, :10, :15, so avoid them.
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
@@ -211,22 +210,40 @@ steps:
         | cut -c1-40)
       BRANCH="agent/wi-${WI_ID}-${SLUG}"
 
-      # ---------- 4. Clone TFS, snapshot base, create branch, strip credentials ----------
-      # Clone with auth via http.extraheader (PAT never appears in URL or logs).
+      # ---------- 4. Shallow direct clone of the target branch from TFS ----------
+      # The agent edits files and produces a one-commit format-patch, so it
+      # needs the working tree, not history. A `--depth=1 --single-branch`
+      # clone of just the target branch keeps the transfer bounded to that
+      # branch's tip tree regardless of how much history the TFS repo carries.
+      # The auth header is passed one-shot via `-c` (git does NOT persist a
+      # `-c` value into the new repo's config) and unset defensively afterward,
+      # so the agent has no stored credential and literally cannot push.
+      #
+      # NOTE: the finalize handler clones the target branch independently
+      # (search "Clone the target branch from TFS") with its own PAT scope and
+      # FULL history so it can branch from base_sha. That second clone is a
+      # deliberate security boundary, not duplication to factor out — keep the
+      # auth handling consistent between the two.
       git -c "http.https://${TFS_HOST}/.extraheader=$TFS_AUTH" \
-          clone "$TFS_BASE/_git/$TFS_REPO" "$TFS_WORK"
+          clone --depth=1 --single-branch --branch "$TFS_TARGET_BRANCH" \
+          "$TFS_BASE/_git/$TFS_REPO" "$TFS_WORK"
       git -C "$TFS_WORK" config user.email "agent-bot@noreply.local"
       git -C "$TFS_WORK" config user.name "tfs-implement"
+
       # Snapshot the target-branch tip BEFORE the agent makes any changes. The
       # finalize handler will branch from this exact SHA so a patch produced
       # against this state always applies cleanly even if the target branch
       # moves during the run. If it moved, TFS surfaces the PR as "behind
       # main" — same UX as a stale human PR — rather than the handler failing
       # `git am` and leaving the work item stuck in agent-in-progress.
-      BASE_SHA=$(git -C "$TFS_WORK" rev-parse "origin/$TFS_TARGET_BRANCH")
-      git -C "$TFS_WORK" checkout -b "$BRANCH" "$BASE_SHA"
-      # CRITICAL: drop the credential header so the agent cannot push.
-      # Push is mediated by the safe-output handler that has its own PAT scope.
+      # HEAD already is the target tip we just cloned, so branch straight off it.
+      BASE_SHA=$(git -C "$TFS_WORK" rev-parse HEAD)
+      git -C "$TFS_WORK" checkout -b "$BRANCH"
+
+      # CRITICAL: drop the credential header so the agent cannot push to TFS.
+      # The clone used a one-shot `-c` header that git does not persist, but
+      # unset defensively. Push to TFS is mediated by the safe-output handler
+      # that has its own PAT scope.
       git -C "$TFS_WORK" config --local --unset "http.https://${TFS_HOST}/.extraheader" || true
 
       # ---------- 5. Sanitize untrusted WI fields, then persist for the agent ----------
@@ -318,6 +335,14 @@ safe-outputs:
           required: true
           description: "Body of the PR review-notes thread (markdown). Posted as a comment thread on the TFS PR for the human reviewer — explains what changed, what was tested, confidence, and what to double-check."
       runs-on: ubuntu-latest
+      # gh-aw safe-output handler jobs default to `permissions: {}` (no scopes).
+      # This handler no longer clones the GitHub repo — it clones the target
+      # branch straight from TFS via TFS_PAT — but `contents: read` is retained
+      # conservatively so gh-aw's agent-artifact download (which carries the
+      # format-patch this job consumes) is not starved of scope. The TFS write
+      # goes via TFS_PAT, never this token.
+      permissions:
+        contents: read
       env:
         TFS_PAT: ${{ secrets.TFS_PAT }}
         TFS_BASE: ${{ vars.TFS_BASE }}
@@ -398,9 +423,9 @@ safe-outputs:
             # format-patch file in its artifact. gh-aw bundles the agent's
             # /tmp/gh-aw/agent/ tree into the artifact, so the patch the agent
             # wrote to /tmp/gh-aw/agent/aw-tfs-wi-<id>.patch lands at
-            # safe-jobs/agent/aw-tfs-wi-<id>.patch after download. We clone
-            # TFS fresh (PAT scoped to this job), git-am the patch on top of
-            # main, and push the branch.
+            # safe-jobs/agent/aw-tfs-wi-<id>.patch after download. We clone the
+            # target branch fresh from TFS, git-am the patch on top of the
+            # snapshotted base, and push the branch back to TFS.
             PATCH_FILE="${{ runner.temp }}/gh-aw/safe-jobs/agent/aw-tfs-wi-${WI_ID}.patch"
             if [ ! -f "$PATCH_FILE" ]; then
               echo "ERROR: expected patch file at $PATCH_FILE was not in the agent artifact." >&2
@@ -411,23 +436,36 @@ safe-outputs:
 
             PUSH_STAGING="${{ runner.temp }}/push-staging"
             TFS_HOST="${TFS_BASE#*://}"; TFS_HOST="${TFS_HOST%%/*}"
+
+            # Clone the target branch from TFS. Unlike the agent's claim-step
+            # clone (shallow — it only needed a working tree), this clone keeps
+            # FULL history: we must branch from base_sha, the tip the agent
+            # snapshotted, and base_sha is an ancestor of the current target
+            # tip (the branch only advances under branch protection), so a
+            # full single-branch clone is guaranteed to contain it. A shallow
+            # clone could miss base_sha if the target moved during the run.
+            # The auth header is passed one-shot via `-c` for the clone, then
+            # persisted because the fetch/push below reuse it. The remote is
+            # renamed origin -> tfs so the existing `tfs/...` / `push tfs`
+            # references downstream keep working unchanged.
             git -c "http.https://${TFS_HOST}/.extraheader=$TFS_AUTH" \
-                clone --branch "$TFS_TARGET_BRANCH" --single-branch \
-                "$TFS_BASE/_git/$TFS_REPO" \
-                "$PUSH_STAGING"
+                clone --single-branch --branch "$TFS_TARGET_BRANCH" \
+                "$TFS_BASE/_git/$TFS_REPO" "$PUSH_STAGING"
+            git -C "$PUSH_STAGING" remote rename origin tfs
             git -C "$PUSH_STAGING" config --local "http.https://${TFS_HOST}/.extraheader" "$TFS_AUTH"
             git -C "$PUSH_STAGING" config user.email "agent-bot@noreply.local"
             git -C "$PUSH_STAGING" config user.name  "tfs-implement"
 
             # Verify base_sha is reachable from the target branch. Defense
             # against an intent that supplies an arbitrary commit not part of
-            # the project's history — e.g., from a different branch.
+            # the project's history — e.g., from a different branch. The TFS
+            # tip lives at `tfs/$TFS_TARGET_BRANCH` (the renamed clone remote).
             if ! git -C "$PUSH_STAGING" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
               echo "ERROR: base_sha $BASE_SHA is not present in the cloned $TFS_TARGET_BRANCH history." >&2
               exit 1
             fi
-            if ! git -C "$PUSH_STAGING" merge-base --is-ancestor "$BASE_SHA" "origin/$TFS_TARGET_BRANCH"; then
-              echo "ERROR: base_sha $BASE_SHA is not an ancestor of origin/$TFS_TARGET_BRANCH." >&2
+            if ! git -C "$PUSH_STAGING" merge-base --is-ancestor "$BASE_SHA" "tfs/$TFS_TARGET_BRANCH"; then
+              echo "ERROR: base_sha $BASE_SHA is not an ancestor of tfs/$TFS_TARGET_BRANCH." >&2
               echo "Refusing to push a branch whose base is outside the target branch's history." >&2
               exit 1
             fi
@@ -446,8 +484,38 @@ safe-outputs:
               exit 1
             fi
 
-            git -C "$PUSH_STAGING" push origin "$BRANCH"
-            echo "Pushed branch $BRANCH to TFS."
+            # Try a regular push first. When the branch is new on TFS this
+            # succeeds. If it already exists from a prior attempt of this WI
+            # the push is rejected non-fast-forward — handled below.
+            PUSH_ERR=$(mktemp)
+            if git -C "$PUSH_STAGING" push tfs "$BRANCH" 2>"$PUSH_ERR"; then
+              echo "Pushed branch $BRANCH to TFS."
+              rm -f "$PUSH_ERR"
+            else
+              cat "$PUSH_ERR" >&2
+              if ! grep -qE "non-fast-forward|fetch first|\[rejected\]" "$PUSH_ERR"; then
+                echo "ERROR: push to TFS failed for a reason other than non-fast-forward." >&2
+                rm -f "$PUSH_ERR"
+                exit 1
+              fi
+              rm -f "$PUSH_ERR"
+              echo "Branch $BRANCH already exists on TFS — reconciling with our work."
+              # Fetch the existing remote branch so we can compare trees and
+              # use --force-with-lease (which gates on the just-fetched tip).
+              # Explicit refspec so the `rev-parse refs/remotes/tfs/$BRANCH`
+              # below works without relying on the remote's configured fetch
+              # refspec.
+              git -C "$PUSH_STAGING" fetch tfs "+refs/heads/${BRANCH}:refs/remotes/tfs/${BRANCH}"
+              LOCAL_TREE=$(git -C "$PUSH_STAGING" rev-parse "HEAD^{tree}")
+              REMOTE_TREE=$(git -C "$PUSH_STAGING" rev-parse "refs/remotes/tfs/$BRANCH^{tree}")
+              if [ "$LOCAL_TREE" = "$REMOTE_TREE" ]; then
+                echo "TFS branch already contains the same tree as our patch (different commit SHA from prior attempt). Skipping push."
+              else
+                echo "TFS branch tree differs from our patch — force-pushing the updated work."
+                git -C "$PUSH_STAGING" push --force-with-lease tfs "$BRANCH"
+                echo "Force-pushed branch $BRANCH to TFS."
+              fi
+            fi
 
             # ---------- Open the PR ----------
             # Grab both repo id and project id from the same call — the
@@ -469,40 +537,151 @@ safe-outputs:
               '{sourceRefName: ("refs/heads/" + $branch),
                 targetRefName: ("refs/heads/" + $target),
                 title: $title, description: $desc}')
-            PR_RESULT=$(curl -fsS -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
+            # Capture HTTP status separately so we can recover from 409
+            # ("active PR already exists for source/target"). Happens when a
+            # previous run pushed the branch and opened a PR but failed
+            # before finalizing — or when the same WI is re-dispatched.
+            # Reusing the existing PR keeps the workflow idempotent on retry.
+            PR_RESPONSE=$(mktemp)
+            PR_HTTP_CODE=$(curl -sS -o "$PR_RESPONSE" -w "%{http_code}" \
+              -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
               --data "$PR_BODY" \
               "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests?api-version=6.0")
-            PR_ID=$(echo "$PR_RESULT" | jq -r '.pullRequestId')
+            if [ "$PR_HTTP_CODE" = "201" ]; then
+              PR_ID=$(jq -r '.pullRequestId' "$PR_RESPONSE")
+              echo "Created PR #$PR_ID"
+            elif [ "$PR_HTTP_CODE" = "409" ]; then
+              echo "PR already exists for refs/heads/$BRANCH -> refs/heads/$TFS_TARGET_BRANCH; looking it up to reuse."
+              EXISTING=$(curl -fsS -H "$TFS_AUTH" -G \
+                --data-urlencode "searchCriteria.sourceRefName=refs/heads/$BRANCH" \
+                --data-urlencode "searchCriteria.targetRefName=refs/heads/$TFS_TARGET_BRANCH" \
+                --data-urlencode "searchCriteria.status=active" \
+                --data-urlencode "api-version=6.0" \
+                "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests")
+              PR_ID=$(echo "$EXISTING" | jq -r '.value[0].pullRequestId // empty')
+              if [ -z "$PR_ID" ]; then
+                echo "ERROR: TFS returned 409 but no matching active PR was found. PR creation response:" >&2
+                cat "$PR_RESPONSE" >&2
+                rm -f "$PR_RESPONSE"
+                exit 1
+              fi
+              echo "Reusing existing PR #$PR_ID"
+            else
+              echo "ERROR: PR creation failed with HTTP $PR_HTTP_CODE. Response body:" >&2
+              cat "$PR_RESPONSE" >&2
+              rm -f "$PR_RESPONSE"
+              exit 1
+            fi
+            rm -f "$PR_RESPONSE"
 
+            # Always attempt to post the review-notes thread. If a prior
+            # attempt of the same WI already posted an equivalent thread,
+            # TFS returns 409 — log and continue rather than fail, so we
+            # don't lose the thread in the (rare) case where the prior
+            # attempt created the PR but died before the thread POST.
+            # Anything else still fails loudly with the response body.
             THREAD=$(jq -n --arg body "$REVIEW_NOTES" \
               '{comments:[{parentCommentId:0, content:$body, commentType:1}], status:1}')
-            curl -fsS -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
+            THREAD_RESPONSE=$(mktemp)
+            THREAD_HTTP_CODE=$(curl -sS -o "$THREAD_RESPONSE" -w "%{http_code}" \
+              -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
               --data "$THREAD" \
-              "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0" \
-              > /dev/null
+              "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0")
+            case "$THREAD_HTTP_CODE" in
+              200|201)
+                echo "Posted review-notes thread to PR #$PR_ID."
+                ;;
+              409)
+                echo "Review-notes thread already present on PR #$PR_ID — skipping (likely from a prior attempt)."
+                ;;
+              *)
+                echo "ERROR: Failed to post review-notes thread (HTTP $THREAD_HTTP_CODE). Response:" >&2
+                cat "$THREAD_RESPONSE" >&2
+                rm -f "$THREAD_RESPONSE"
+                exit 1
+                ;;
+            esac
+            rm -f "$THREAD_RESPONSE"
 
-            # Single atomic WI patch: rev guard + tag transition + PR link.
-            # The artifact URI uses URL-encoded slashes (%2F) as Azure DevOps
-            # expects in the vstfs:///Git/PullRequestId/<proj>/<repo>/<pr>
+            # Atomic WI patch: rev guard + tag transition + (conditional) PR
+            # link. The artifact URI uses URL-encoded slashes (%2F) as Azure
+            # DevOps expects in the vstfs:///Git/PullRequestId/<proj>/<repo>/<pr>
             # identifier. Adding the relation here (not via the PR POST) is
             # what populates the WI's right-side "Work items" / "Pull
             # Requests" panel and clears the "Work items must be linked"
             # branch policy gate.
+            #
+            # Wrapped in a retry loop because TFS's PR creation triggers an
+            # asynchronous WI auto-linking pass (the PR description + branch
+            # name reference #<wi-id>), which bumps the WI rev in the
+            # ~milliseconds between our GET and PATCH and makes the rev test
+            # op fail 412. The PATCH still has to GUARD against concurrent
+            # human edits, so we re-test against the just-fetched rev rather
+            # than dropping the guard. `$expand=relations` lets us dedupe the
+            # ArtifactLink add — TFS returns 409 RelationAlreadyExistsException
+            # if we POST a duplicate (happens on retried WIs whose prior
+            # attempt got this far).
             PR_ARTIFACT="vstfs:///Git/PullRequestId/${PROJECT_ID}%2F${REPO_ID}%2F${PR_ID}"
-            WI=$(curl -fsS -H "$TFS_AUTH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0")
-            REV=$(echo "$WI"  | jq -r '.rev')
-            TAGS=$(echo "$WI" | jq -r '.fields["System.Tags"] // ""')
-            NEW_TAGS=$(echo "$TAGS" | sed 's/agent-in-progress/agent-pr-opened/g')
-            PATCH=$(jq -n --argjson rev "$REV" --arg tags "$NEW_TAGS" --arg link "$PR_ARTIFACT" \
-              '[{"op":"test","path":"/rev","value":$rev},
-                {"op":"replace","path":"/fields/System.Tags","value":$tags},
-                {"op":"add","path":"/relations/-","value":{
-                   "rel":"ArtifactLink",
-                   "url":$link,
-                   "attributes":{"name":"Pull Request"}
-                 }}]')
-            curl -fsS -X PATCH -H "$TFS_AUTH" -H "Content-Type: application/json-patch+json" \
-              --data "$PATCH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0" > /dev/null
+            WI_PATCH_HTTP_CODE=""
+            WI_PATCH_RESPONSE=$(mktemp)
+            for attempt in 1 2 3 4 5 6 7 8; do
+              WI=$(curl -fsS -H "$TFS_AUTH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?\$expand=relations&api-version=6.0")
+              REV=$(echo "$WI"  | jq -r '.rev')
+              TAGS=$(echo "$WI" | jq -r '.fields["System.Tags"] // ""')
+              NEW_TAGS=$(echo "$TAGS" | sed 's/agent-in-progress/agent-pr-opened/g')
+              ARTIFACT_EXISTS=$(echo "$WI" | jq --arg link "$PR_ARTIFACT" \
+                '[(.relations // [])[] | select(.rel == "ArtifactLink" and .url == $link)] | length')
+              if [ "$ARTIFACT_EXISTS" -eq 0 ]; then
+                PATCH=$(jq -n --argjson rev "$REV" --arg tags "$NEW_TAGS" --arg link "$PR_ARTIFACT" \
+                  '[{"op":"test","path":"/rev","value":$rev},
+                    {"op":"replace","path":"/fields/System.Tags","value":$tags},
+                    {"op":"add","path":"/relations/-","value":{
+                       "rel":"ArtifactLink",
+                       "url":$link,
+                       "attributes":{"name":"Pull Request"}
+                     }}]')
+              else
+                [ "$attempt" -eq 1 ] && echo "ArtifactLink for PR #$PR_ID already present on WI #$WI_ID — skipping relation add."
+                PATCH=$(jq -n --argjson rev "$REV" --arg tags "$NEW_TAGS" \
+                  '[{"op":"test","path":"/rev","value":$rev},
+                    {"op":"replace","path":"/fields/System.Tags","value":$tags}]')
+              fi
+              WI_PATCH_HTTP_CODE=$(curl -sS -o "$WI_PATCH_RESPONSE" -w "%{http_code}" \
+                -X PATCH -H "$TFS_AUTH" -H "Content-Type: application/json-patch+json" \
+                --data "$PATCH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0")
+              if [ "$WI_PATCH_HTTP_CODE" = "200" ]; then
+                break
+              fi
+              # Rev mismatch comes back as 412 on Azure DevOps cloud but 409
+              # on on-prem TFS (TF26071 / WorkItemRevisionMismatchException).
+              # Only retry the 409 case when the body confirms it's a rev
+              # mismatch, so we don't mask other 409s (e.g., a future
+              # RelationAlreadyExists that escapes the dedupe check).
+              if [ "$WI_PATCH_HTTP_CODE" = "412" ] || \
+                 { [ "$WI_PATCH_HTTP_CODE" = "409" ] && \
+                   grep -qE "TF26071|WorkItemRevisionMismatchException" "$WI_PATCH_RESPONSE"; }; then
+                echo "WI rev moved between GET and PATCH (attempt $attempt, rev was $REV, HTTP $WI_PATCH_HTTP_CODE) — refetching and retrying."
+                sleep 1
+                continue
+              fi
+              # Any other status: surface immediately, no retry.
+              break
+            done
+            if [ "$WI_PATCH_HTTP_CODE" = "200" ]; then
+              rm -f "$WI_PATCH_RESPONSE"
+            else
+              echo "ERROR: WI patch failed (HTTP $WI_PATCH_HTTP_CODE) on WI #$WI_ID after retries." >&2
+              echo "Last patch body sent:" >&2
+              echo "$PATCH" >&2
+              echo "TFS response:" >&2
+              cat "$WI_PATCH_RESPONSE" >&2
+              echo "" >&2
+              echo "PR #$PR_ID was created and the review-notes thread was posted," >&2
+              echo "but the work item link / tag transition did not complete." >&2
+              echo "A human can add the WI link via the TFS UI and flip the tag manually." >&2
+              rm -f "$WI_PATCH_RESPONSE"
+              exit 1
+            fi
 
             echo "Finalized PR #$PR_ID for work item #$WI_ID"
 
@@ -726,7 +905,7 @@ reviewer should verify.
 Linked work item: #<id>
 ```
 
-PR review-notes template — fill in honestly:
+Self-review template — fill in honestly:
 
 ```markdown
 ## PR Review Notes
