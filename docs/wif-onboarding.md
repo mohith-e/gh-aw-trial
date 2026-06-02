@@ -36,7 +36,16 @@ You need org-admin access to [console.anthropic.com](https://console.anthropic.c
 
 ## Anthropic Console setup
 
-> **For RealPage teams:** the COE maintains shared org-level resources. If you are onboarding a repo under the `RealPage` GitHub org, skip to [GitHub variables](#github-variables) — the issuer, service account, and federation rule are already configured. Contact the COE if you need a repo-scoped override.
+> **For RealPage teams:** the COE maintains shared org-level resources for the `RealPage` GitHub org. Skip to [GitHub variables](#github-variables) — the resources below are already configured:
+>
+> | Resource | Name | ID |
+> |---|---|---|
+> | Issuer | GitHub Actions | `fdis_01RPUmB9gNG4qojQ96FWSEDi` |
+> | Service account | `realpage-gh` | `svac_019jzdxfMyvmSUQQoJF1Q5e7` |
+> | Federation rule | `realpage-org` (`repo:RealPage/*`) | `fdrl_01UrTuTXEcPdS3ckapB7re3y` |
+> | Workspace | `github-actions` | `wrkspc_011kuRkDngP7B49bQc5AZLVJ` |
+>
+> Contact the COE if you need a repo-scoped override.
 
 ### Step 1: Create the federation issuer
 
@@ -54,11 +63,11 @@ Save. The issuer gets an `fdis_...` ID.
 
 Navigate to **Settings → Service accounts → Create service account**.
 
-Naming convention: `<product>-ghaw` (e.g., `payments-ghaw`, `knock-ghaw`). One service account per product area.
-
-Assign it to the appropriate workspace. If you are using the Default workspace, leave workspace selection empty.
+Naming convention: `<product>-gh` (e.g., `payments-gh`, `knock-gh`). One service account per product area.
 
 Save. The service account gets an `svac_...` ID.
+
+**Add it to the target workspace.** The service account is created at the org level and is not automatically active in any named workspace. Open the service account's full detail page (**Settings → Service accounts → click the row → Open full page**) and add it as a member of each workspace the federation rule will target. Tokens minted for a workspace the service account is not a member of will be rejected with 401 at exchange time.
 
 ### Step 3: Create a federation rule
 
@@ -120,6 +129,7 @@ engine:
     federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
     organization-id: cb16d48f-b95b-4b2c-9e86-a09f46eccb90   # RealPage Anthropic org
     service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+    workspace-id: wrkspc_011kuRkDngP7B49bQc5AZLVJ           # github-actions workspace
   env:
     # Routing signal for awf — required until gh-aw-firewall#4117 ships.
     # awf only sets ANTHROPIC_BASE_URL in the agent container when ANTHROPIC_API_KEY
@@ -128,7 +138,7 @@ engine:
     ANTHROPIC_API_KEY: "sk-ant-placeholder-key-for-credential-isolation"
 ```
 
-`workspace-id` is optional — omit it when the federation rule targets the Default workspace (which has no `wrkspc_` ID).
+`workspace-id` is required when the federation rule targets a named workspace. Omit it only when using the Default workspace (which has no `wrkspc_` ID). For RealPage, `wrkspc_011kuRkDngP7B49bQc5AZLVJ` (`github-actions`) is hardcoded above — it is the same for every repo in the org.
 
 See [`workflows/wif-poc.md`](../workflows/wif-poc.md) for a complete minimal workflow you can dispatch to verify auth end-to-end.
 
