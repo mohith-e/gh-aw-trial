@@ -1,6 +1,8 @@
 # WIF Onboarding: Keyless Anthropic Auth for gh-aw
 
-**Status: preview for early adopters — requires gh-aw v0.77.5+**
+**Status: preview — not ready for dev rollout**
+
+> **Rollout blocker:** The auto-generated threat-detection job fails with HTTP 401 under WIF auth — the gh-aw compiler omits `id-token: write` from the detection job's permissions, so the api-proxy can't mint the OIDC JWT. Detection annotations appear on every run but the workflow still passes. Fix is pending in [github/gh-aw#36460](https://github.com/github/gh-aw/issues/36460). Rollout to teams is paused until a gh-aw release that includes that fix ships and workflows are recompiled. See [agentic-workflows#80](https://github.com/RealPage/agentic-workflows/issues/80).
 
 > **Known limitation:** A placeholder `ANTHROPIC_API_KEY` is still required in `engine.env` as a routing signal (see [Workflow frontmatter](#workflow-frontmatter)). This is a dummy value — the proxy uses WIF, not the key. The requirement will be removed when [gh-aw-firewall#4117](https://github.com/github/gh-aw-firewall/issues/4117) ships in a new firewall release.
 
@@ -188,6 +190,7 @@ Both endpoints require an Admin API key (`sk-ant-admin-...`). See the [usage rep
 
 | Limitation | Detail |
 |---|---|
+| **Detection job fails with HTTP 401** | The gh-aw compiler omits `id-token: write` from the auto-generated threat-detection job's permissions block under WIF auth. The detection model never runs and three annotations appear on every run. Fix pending in [github/gh-aw#36460](https://github.com/github/gh-aw/issues/36460). This is the current rollout blocker. |
 | Requires gh-aw ≥ v0.77.5 | Earlier stable releases lack WIF support |
 | Long-running jobs (>10 min) | Untested — the 600s JWT lifetime may expire before the workflow completes. The api-proxy inherits `BaseOidcTokenProvider` refresh logic (auto-refresh at 75% of lifetime), but this has not been validated for long runs |
 | Default workspace | Has no `wrkspc_` ID in the Console — omit `workspace-id` from frontmatter |
