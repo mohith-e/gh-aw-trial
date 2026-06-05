@@ -477,7 +477,20 @@ safe-outputs:
             git -C "$PUSH_STAGING" checkout -B "$BRANCH" "$BASE_SHA"
 
             # git am preserves the agent's commit author + message from the patch.
-            if ! git -C "$PUSH_STAGING" am < "$PATCH_FILE"; then
+            # --keep-cr is REQUIRED: this repo is mixed-EOL (some files stored
+            # CRLF, some LF) and the agent's format-patch faithfully carries each
+            # file's endings. git am parses the patch as an email (mailsplit /
+            # mailinfo) and by default STRIPS the trailing CR from every line
+            # before applying — which de-CRs the context of CRLF files so they no
+            # longer match the CRLF working tree at base_sha, and `git am` rejects
+            # them with "patch does not apply" (LF files are unaffected). Keeping
+            # the CR makes the strict apply match end-to-end and, crucially,
+            # leaves the agent's already-correct line endings intact — no EOL
+            # drift introduced into the PR. (`--3way` would NOT fix this: the CR
+            # stripping happens in the mail-parse stage before apply, and a 3-way
+            # merge could even succeed while leaving an added line as LF inside a
+            # CRLF file.)
+            if ! git -C "$PUSH_STAGING" am --keep-cr < "$PATCH_FILE"; then
               echo "ERROR: git am failed — the agent's patch does not apply cleanly to base_sha $BASE_SHA." >&2
               echo "This indicates the patch was produced against a different base than was snapshotted." >&2
               git -C "$PUSH_STAGING" am --abort || true
