@@ -9,9 +9,15 @@ on:
     types: [labeled]
   workflow_dispatch:
 
-engine: claude
+imports:
+  - shared/wif-engine.md
 
-permissions: read-all
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+  id-token: write
 
 network: defaults
 

@@ -6,6 +6,8 @@ This is RealPage's library of ready-made [GitHub Agentic Workflows](https://gith
 
 If you've been hand-rolling agents on your laptop, this is where that work becomes shared infrastructure.
 
+> **Authentication:** Workflows that use an `ANTHROPIC_API_KEY` repo secret attribute API usage to the key owner's personal account — automated runs look like individual usage in billing reports. For any product or team workflow, use WIF (Workload Identity Federation) instead: usage flows to a service account, nothing needs to be stored or rotated. See [Authentication](docs/wif-auth.md).
+
 ---
 
 ## Pick Your Path
@@ -118,7 +120,7 @@ The side-by-side:
 | Python/Node file with hardcoded `anthropic` calls | A markdown file with frontmatter + natural-language prompt |
 | `gh pr comment`, `gh issue create`, `git push` called directly | Safe-outputs (`add-comment`, `create-issue`, `push-to-pull-request-branch`) — the harness does the writes |
 | Cron job on your laptop, or `launchd`, or a VM nobody owns | GitHub Actions schedule / label / PR trigger |
-| Secrets in your shell env (`ANTHROPIC_API_KEY=...`) | Repo secret, injected by the harness at run time |
+| Secrets in your shell env (`ANTHROPIC_API_KEY=...`) | WIF keyless auth — no secret, usage attributed to a service account. See [Authentication](docs/wif-auth.md). |
 | "It works on my machine" | Runs identically for every team member |
 
 The **single biggest unlock** is safe-outputs: instead of your script holding raw write credentials, gh-aw's harness accepts structured instructions from the agent (*"post this comment"*, *"open this PR"*) and performs them with scoped permissions. You keep the prompt, you drop the boilerplate, and you get reviewability — because your agent is now just a markdown file in your repo, tracked in git.
@@ -155,6 +157,7 @@ When you're ready to try one for real, go back to **Pick Your Path** at the top 
 - [gh-aw documentation](https://github.github.com/gh-aw/) — the official GitHub Agentic Workflows docs
 - [gh-aw imports reference](https://github.github.com/gh-aw/reference/imports/#remote-repository-imports) — how remote imports and version pinning work
 - [Agent Factory blog series](https://github.github.com/gh-aw/blog/) — 100+ production workflows with real metrics
+- [Authentication](docs/wif-auth.md) — WIF keyless auth: how to set it up and request a service account
 - [Workflow reference](docs/workflows.md) — detailed docs on every workflow in this repo, including pipeline diagrams
 - [CLI cheatsheet](docs/cli-cheatsheet.md) — common `gh aw` commands for managing and debugging
 

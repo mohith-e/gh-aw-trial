@@ -4,9 +4,13 @@ on:
     types: [opened, reopened]  # No `synchronize` — intentional. The agent reviews once on open. Re-triggering on every push would be expensive and noisy. Developers who want a re-review can close and reopen the PR.
   workflow_dispatch:
 
-engine: claude
+imports:
+  - shared/wif-engine.md
 
-permissions: read-all
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
 
 network: defaults
 
