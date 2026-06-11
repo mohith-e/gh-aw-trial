@@ -8,7 +8,7 @@ When a workflow runs, the GitHub Actions runner mints a short-lived OpenID Conne
 
 ## Prerequisites
 
-**gh-aw ≥ v0.79.4.** Check your version:
+**gh-aw ≥ v0.79.6.** Check your version:
 
 ```bash
 gh aw --version
