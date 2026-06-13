@@ -1,6 +1,6 @@
 # WIF Administration: Federation Rules, Service Accounts, and Cost Attribution
 
-This doc covers the back-office side of Workload Identity Federation for gh-aw at RealPage. Primary audience: COE. Future audience: IT, once Anthropic ships an admin API that would let us automate provisioning via Terraform or similar.
+This doc covers the back-office side of Workload Identity Federation for gh-aw at RealPage. Primary audience: COE. Provisioning is now **automated** by the `wif-admin` workflow in `RealPage/ai-internal-enablement` (see [Automated onboarding](#automated-onboarding-recommended)); the manual Console steps remain as a fallback and for the one-time bootstrap.
 
 For the dev-facing guide (how to add WIF to a workflow), see [`docs/wif-auth.md`](wif-auth.md).
 
@@ -22,9 +22,30 @@ These IDs are hardcoded in `workflows/shared/wif-engine.md` and referenced from 
 
 ---
 
-## Setting up a new GitHub org
+## Automated onboarding (recommended)
 
-You need org-admin access to [console.anthropic.com](https://console.anthropic.com) to create the resources below. Only needed when onboarding a GitHub org for the first time.
+The `wif-admin` workflow in [`RealPage/ai-internal-enablement`](https://github.com/RealPage/ai-internal-enablement) provisions WIF resources via the [Anthropic WIF Admin API](https://platform.claude.com/docs/en/manage-claude/wif-admin-api), so you no longer click through the Console for the common cases. It mints a short-lived `org:admin` token at runtime (WIF) and runs idempotent, list-then-create CRUD. Full runbook: [`docs/wif-admin-runbook.md`](https://github.com/RealPage/ai-internal-enablement/blob/main/docs/wif-admin-runbook.md).
+
+**To onboard a service account:** file the **Anthropic service account request** issue form in `ai-internal-enablement` (or run the workflow manually with `action=create-service-account`, inputs `github_org` + `product_name`). The run pauses at a **team-approval gate**; a member of `@RealPage/anthropic-service-account-admins` approves the `wif-provisioning` deployment. On approval the workflow:
+
+- ensures the `github-actions` workspace and the GitHub Actions issuer exist;
+- creates the service account (`organization_role: developer`) and adds it to the workspace with role `workspace_developer`;
+- creates the federation rule for `repo:<org>/*` targeting that service account;
+- prints the `ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_SERVICE_ACCOUNT_ID` to set (output-only — a human sets the org/repo Actions variables; the workflow can't write them).
+
+**Actions:** `create-service-account`, `archive-service-account`, `create-rule` (targets an existing SA), `archive-rule`, `create-workspace`, `describe-rule`.
+
+**Model — one rule per service account.** A federation rule targets exactly one SA (the minted token acts as that target). Service accounts are per product; a GitHub org can have several. All of an org's rules share subject `repo:<org>/*` + claims (`repository_owner`, `repository_owner_id`), and each targets its own SA. So `ANTHROPIC_FEDERATION_RULE_ID` and `ANTHROPIC_SERVICE_ACCOUNT_ID` are **both per product, set together**.
+
+**Authorization.** Anyone can file/dispatch, but only the `anthropic-service-account-admins` team can approve the gated deployment — that, not who can file or label, is the control. (There is no approval label; the GitHub Environment `wif-provisioning` with required reviewers is the gate.)
+
+**One-time bootstrap (manual, Console).** The `org:admin` federation rule that lets the workflow call the Admin API must be created once in the Console — Anthropic blocks automation from self-granting `org:admin`. See the runbook's bootstrap section. After that, everything below is automated.
+
+---
+
+## Manual provisioning (fallback / bootstrap)
+
+Prefer the automated flow above. These manual Console steps are the fallback and the way to perform the one-time bootstrap. You need org-admin access to [console.anthropic.com](https://console.anthropic.com).
 
 ### The shared federation issuer
 
@@ -64,10 +85,11 @@ For an org-wide rule (all repos in a GitHub org):
 
 | Claim | Value | Varies? |
 |---|---|---|
-| `repository_owner` | The GitHub org (e.g., `RealPage`, `knockrentals`) | **Yes** — one rule per org |
-| `enterprise` | `realpage` | **No** — always `realpage` for all RealPage-managed GitHub orgs |
+| `repository_owner` | The GitHub org, GitHub-canonical case (e.g., `RealPage`, `knockrentals`) | **Yes** — per org |
+| `repository_owner_id` | The org's numeric id (`gh api orgs/<org> --jq .id`) | **Yes** — per org |
+| `enterprise` | `realpage` | **No** — optional; always `realpage` for RealPage-managed orgs |
 
-`enterprise: realpage` pins the rule to the RealPage GitHub Enterprise, preventing JWT reuse from a same-named org elsewhere. The value is the slug from `https://github.com/enterprises/realpage`.
+A rule targets exactly **one** service account, so an org with multiple product SAs has multiple rules — all sharing the `repo:<org>/*` subject and claims above, each targeting its own SA. The automated workflow pins `repository_owner` + `repository_owner_id` (immutable; survives org renames). `enterprise: realpage` is an alternative/additional pin (the slug from `https://github.com/enterprises/realpage`); the case-sensitive `repository_owner` match is why the canonical org case matters.
 
 For repo-scoped rules (tighter; recommended for production):
 
@@ -125,6 +147,8 @@ Shows recent token exchange attempts — check here first when a workflow run re
 
 ---
 
-## Future: automation via Anthropic admin API
+## Automation status
 
-Provisioning today is manual (Console UI + org-level variables). Once Anthropic ships a stable admin API covering service accounts and federation rules, the intent is to automate this via Terraform or a gh-aw workflow — driven by the issue template in `ai-internal-enablement`. Until then, provisioning is a manual admin step by the COE.
+**Shipped (2026-06): the `wif-admin` workflow** in `ai-internal-enablement` automates provisioning via the Anthropic WIF Admin API — see [Automated onboarding](#automated-onboarding-recommended). Conventional (non-gh-aw) GitHub Actions; deterministic, idempotent, team-gated.
+
+A Terraform/IaC alternative was evaluated and deferred to a backlog spike ([`ai-internal-enablement#827`](https://github.com/RealPage/ai-internal-enablement/issues/827)) — pursue only if a maintained community/Anthropic provider appears.

@@ -73,12 +73,16 @@ Expected: `AWF_AUTH_TYPE`, `AWF_AUTH_PROVIDER`, `AWF_AUTH_ANTHROPIC_FEDERATION_R
 
 ## Variables
 
-Two Actions variables are required. Set them at the repo level (Settings → Secrets and variables → Actions → Variables), or at the GitHub org level to share across repos in that org.
+WIF auth needs **two** Actions variables, and they are a **matched pair**: a federation rule targets exactly one service account, so the rule ID and the service account ID must correspond. **Always set both together** — never one without the other.
 
-| Variable | Who sets it | Notes |
-|---|---|---|
-| `ANTHROPIC_FEDERATION_RULE_ID` | Already set at org level for `RealPage` GitHub org | If your repo is under a different GitHub org, set this at that org level after requesting a federation rule (see below) |
-| `ANTHROPIC_SERVICE_ACCOUNT_ID` | **You** — set this per repo or per org | Provisioned when you request a service account; one per product area |
+| Variable | What it is |
+|---|---|
+| `ANTHROPIC_FEDERATION_RULE_ID` | The federation rule that targets *your* service account (`fdrl_...`) |
+| `ANTHROPIC_SERVICE_ACCOUNT_ID` | *Your* service account (`svac_...`) — the rule's target |
+
+Set them at the **repo level** (Settings → Secrets and variables → Actions → Variables), or at the **GitHub org level** to share a default across repos in that org. A repo-level value overrides the org-level one — but override **both**, or the rule and account won't correspond and the token exchange fails.
+
+Provisioning hands you both values together (see below). The `RealPage` GitHub org has an org-level default pair — the `realpage-org` rule targeting the `realpage-gh` account — for repos that use the shared account; a product with its own service account sets its own pair (its rule + its account) at the repo level.
 
 The shared import references both via `${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}` and `${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}`.
 
@@ -86,13 +90,13 @@ The shared import references both via `${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}`
 
 ## Request a service account
 
-Each product needs its own service account so spend is attributable. Request via the issue template in `RealPage/ai-internal-enablement`:
+Each product gets its own service account (so spend is attributable) **and its own federation rule that targets it** — the two are provisioned together. Request via the issue template in `RealPage/ai-internal-enablement`:
 
 → [New Anthropic service account request](https://github.com/RealPage/ai-internal-enablement/issues/new?template=anthropic-service-account.yml)
 
-One service account per product area. If your repo is under a GitHub org other than `RealPage`, note the org name in the form — admins create the federation rule for that org before provisioning the service account.
+Filing the request runs the `wif-admin` automation (after admin approval). It creates the service account, a federation rule targeting it (subject `repo:<org>/*`), and the workspace membership — then prints the **pair** of values to set: `ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_SERVICE_ACCOUNT_ID`. Set **both** as Actions variables on your repo (or org level to share). Works the same whether your repo is under `RealPage` or another GitHub org (note the org in the form).
 
-Once provisioned, set `ANTHROPIC_SERVICE_ACCOUNT_ID` as an Actions variable on your repo (or org level to share across repos). `ANTHROPIC_FEDERATION_RULE_ID` is already set at the `RealPage` org level; if your repo is under a different GitHub org, the admins will provide the rule ID to set at that org level.
+Multiple products under one GitHub org each get their own pair — several rules can share the `repo:<org>/*` subject, each targeting a different service account; your repo's variable pair selects which one your workflows use.
 
 ---
 
