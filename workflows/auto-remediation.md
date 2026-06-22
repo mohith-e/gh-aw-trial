@@ -58,7 +58,7 @@ tools:
   github:
     toolsets: [default]
 
-safe-inputs:
+mcp-scripts:
   execute-esql:
     description: "Execute an ES|QL query against the Elastic logs cluster and return the results as JSON."
     inputs:
