@@ -1,6 +1,13 @@
 ---
 on: issues
-engine: claude
+
+permissions:
+  contents: read
+  issues: read
+  id-token: write   # required for WIF keyless auth
+
+imports:
+  - shared/wif-engine.md
 
 safe-outputs:
   create-issue:

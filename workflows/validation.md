@@ -1,6 +1,14 @@
 ---
 on: pull_request
-engine: claude
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  id-token: write   # required for WIF keyless auth
+
+imports:
+  - shared/wif-engine.md
 
 safe-outputs:
   add-comment:

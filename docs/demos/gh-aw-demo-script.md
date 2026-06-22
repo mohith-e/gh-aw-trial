@@ -23,9 +23,9 @@ git checkout main && git pull
 # 3. Verify workflows compile clean
 gh aw compile
 
-# 4. Verify secrets are configured
+# 4. Verify auth is configured
 gh secret list -R RealPage/lumina-agents-mcp
-# Should show: ANTHROPIC_API_KEY, COPILOT_GITHUB_TOKEN
+# Should show: COPILOT_GITHUB_TOKEN (Anthropic auth is via WIF — no ANTHROPIC_API_KEY secret; see docs/wif-auth.md)
 
 # 5. Verify GitHub Actions is enabled — check recent runs
 gh run list -R RealPage/lumina-agents-mcp --limit 3
@@ -159,7 +159,7 @@ This segment establishes credibility with the architecture. This audience builds
 | Engine | Frontmatter | Secret |
 |--------|------------|--------|
 | Copilot | `engine: copilot` | `COPILOT_GITHUB_TOKEN` |
-| Claude | `engine: claude` | `ANTHROPIC_API_KEY` |
+| Claude | `engine: claude` (via shared WIF import) | WIF — keyless, no `ANTHROPIC_API_KEY` (see docs/wif-auth.md) |
 | Codex | `engine: codex` | `OPENAI_API_KEY` |
 | Gemini | `engine: gemini` | `GEMINI_API_KEY` |
 

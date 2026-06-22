@@ -8,13 +8,13 @@ Works out of the box in any repo because it discovers the project's stack and te
 
 | Requirement | Why |
 |---|---|
-| Secret: `ANTHROPIC_API_KEY` | The workflow uses `engine: claude`, which calls the Anthropic API. |
+| WIF auth: vars `ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_SERVICE_ACCOUNT_ID` | The workflow authenticates to Anthropic via WIF (keyless) — no `ANTHROPIC_API_KEY` secret. RealPage repos inherit the org-default pair; set repo-level vars to override per product. See [Authentication](../wif-auth.md). |
 | Labels: `agent:implement`, `agent:needs-review`, `agent:needs-clarification`, `ready-for-decomposition` | The workflow triggers on `agent:implement`, applies the `agent:*` labels for PR handoff and ambiguous issues, and applies `ready-for-decomposition` (shared with the `story-decomposition` workflow) when an issue is too large to implement in one pass. |
 | GitHub Actions: "Allow GitHub Actions to create and approve pull requests" | Required by the `create-pull-request` safe output. Settings → Actions → General → Workflow permissions. |
 | Recommended: `CLAUDE.md` in the repo root | The agent trusts `CLAUDE.md` over inference when discovering stack, conventions, and commands. |
 
 ```bash
-gh secret set ANTHROPIC_API_KEY
+# Anthropic auth is via WIF (keyless) — no secret to set. See docs/wif-auth.md.
 gh label create agent:implement --description "Triggers implement-issue workflow" --color "1d76db"
 gh label create agent:needs-review --description "Implementation PR awaiting review" --color "fbca04"
 gh label create agent:needs-clarification --description "Issue needs more detail before implementation" --color "d93f0b"

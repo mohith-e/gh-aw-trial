@@ -96,14 +96,14 @@ Alternatively, pass `fod_release_id` as a `workflow_dispatch` input for ad-hoc r
 | `FOD_USERNAME` | Fortify on Demand username (e.g., `Real_Page\your.user`) |
 | `FOD_PAT` | Fortify on Demand personal access token |
 | `FOD_RELEASE_ID` | Fortify on Demand release ID (see above) |
-| `ANTHROPIC_API_KEY` | API key for the Claude engine |
 
 ```bash
 gh secret set FOD_USERNAME
 gh secret set FOD_PAT
 gh secret set FOD_RELEASE_ID
-gh secret set ANTHROPIC_API_KEY
 ```
+
+> Anthropic auth is via WIF (keyless) — no `ANTHROPIC_API_KEY` secret. RealPage repos inherit the org-default WIF pair; see [Authentication](../wif-auth.md).
 
 ### 5. Create labels
 

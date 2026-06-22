@@ -139,7 +139,7 @@ Before the demo, ensure:
 - [ ] lumina-agents-mcp repo is accessible and has workflows compiled
 - [ ] agentics repo is up to date
 - [ ] A draft feature idea issue is ready to file on lumina-agents-mcp
-- [ ] GitHub Actions is enabled and `ANTHROPIC_API_KEY` secret is configured on lumina-agents-mcp
+- [ ] GitHub Actions is enabled and WIF auth is configured on lumina-agents-mcp (`ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_SERVICE_ACCOUNT_ID` vars; RealPage org default inherited — see docs/wif-auth.md)
 - [ ] Browser tabs pre-loaded: gh-aw docs site, gh-aw blog, agentics README, lumina-agents-mcp repo
 - [ ] Elastic MCP endpoint is configured (for auto-remediation segment if showing live)
 - [ ] Have a pre-recorded or pre-completed run as backup for the live SDLC demo (agent runs take minutes — have one ready to show results while the live one runs)

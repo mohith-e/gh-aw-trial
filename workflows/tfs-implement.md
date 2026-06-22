@@ -20,11 +20,16 @@ on:
         required: false
         type: string
 
-engine: claude
+imports:
+  - shared/wif-engine.md
 
 strict: true
 
-permissions: read-all
+permissions:
+  # Expanded from `read-all` to add `id-token: write` for WIF auth (strict mode
+  # requires it; the shorthand can't carry it).
+  contents: read
+  id-token: write
 
 # ── Network allow-list ────────────────────────────────────────────────────────
 #
@@ -93,7 +98,6 @@ steps:
     # fix it. Runs before any TFS API call.
     env:
       TFS_PAT_SET: ${{ secrets.TFS_PAT != '' }}
-      ANTHROPIC_API_KEY_SET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       TFS_BASE_VAR: ${{ vars.TFS_BASE }}
       TFS_PROJECT_VAR: ${{ vars.TFS_PROJECT }}
       TFS_TEAM_AREA_PATH_VAR: ${{ vars.TFS_TEAM_AREA_PATH }}
@@ -103,7 +107,6 @@ steps:
       set -euo pipefail
       missing=()
       [ "$TFS_PAT_SET" = "true" ]          || missing+=("secret TFS_PAT")
-      [ "$ANTHROPIC_API_KEY_SET" = "true" ] || missing+=("secret ANTHROPIC_API_KEY")
       [ -n "$TFS_BASE_VAR" ]               || missing+=("variable TFS_BASE")
       [ -n "$TFS_PROJECT_VAR" ]            || missing+=("variable TFS_PROJECT")
       [ -n "$TFS_TEAM_AREA_PATH_VAR" ]     || missing+=("variable TFS_TEAM_AREA_PATH")
@@ -126,7 +129,9 @@ steps:
         TFS_PAT             Azure DevOps PAT. Scopes:
                             Code: Read & Write + Work Items: Read & Write
                             on the target TFS project.
-        ANTHROPIC_API_KEY   Claude API key for the agent step.
+
+      Anthropic auth is via WIF (keyless) — no ANTHROPIC_API_KEY secret.
+      RealPage repos inherit the org-default WIF pair; see docs/wif-auth.md.
 
       Add the missing Variables (tab: Variables):
         TFS_BASE            Project base URL, URL-encoded.

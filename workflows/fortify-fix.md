@@ -9,9 +9,16 @@ on:
     types: [labeled]
   workflow_dispatch:
 
-engine: claude
+imports:
+  - shared/wif-engine.md
 
-permissions: read-all
+permissions:
+  # Expanded from `read-all` to add `id-token: write` for WIF auth (strict mode
+  # requires it; the shorthand can't carry it). Covers the github toolset reads.
+  contents: read
+  issues: read
+  pull-requests: read
+  id-token: write
 
 network: defaults
 

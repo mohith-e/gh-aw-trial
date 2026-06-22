@@ -43,8 +43,10 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
+  id-token: write
 
-engine: claude
+imports:
+  - shared/wif-engine.md
 
 network:
   allowed:
