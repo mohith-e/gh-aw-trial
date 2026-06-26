@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/RealPage/agentic-workflows/compare/v0.4.0...v0.5.0) (2026-06-22)
+
+
+### Features
+
+* **tfs-implement:** add reusable TFS work item implementer ([#73](https://github.com/RealPage/agentic-workflows/issues/73)) ([9c1f21f](https://github.com/RealPage/agentic-workflows/commit/9c1f21f56075b651a69bfbcd9c338f6525c02659))
+* **tfs-implement:** add tfs-mirror companion and optimize the clone path ([252ffa7](https://github.com/RealPage/agentic-workflows/commit/252ffa71740d2b1e105c734275e9d546762f2698))
+* **tfs-implement:** clone target branch directly from TFS ([401f95d](https://github.com/RealPage/agentic-workflows/commit/401f95da8e5e0e26b12e9e6070b492270aa81d38))
+* **wif:** extract shared engine config + untrack workflows/*.lock.yml ([#89](https://github.com/RealPage/agentic-workflows/issues/89)) ([684054f](https://github.com/RealPage/agentic-workflows/commit/684054f3dec89e22eb63f2d2083e8b272fdfcd75))
+* **wif:** migrate all 5 golden workflows to WIF auth ([#93](https://github.com/RealPage/agentic-workflows/issues/93)) ([16d267c](https://github.com/RealPage/agentic-workflows/commit/16d267c6031b96b342e1efd75d08a3275ec4d633))
+
+
+### Bug Fixes
+
+* **auto-remediation:** rename safe-inputs → mcp-scripts ([#106](https://github.com/RealPage/agentic-workflows/issues/106)) ([5713947](https://github.com/RealPage/agentic-workflows/commit/5713947fbbab7943a69ca4456dfbbcf706e99859)), closes [#104](https://github.com/RealPage/agentic-workflows/issues/104)
+* remove stray wif-poc test artifact from .github/workflows ([#96](https://github.com/RealPage/agentic-workflows/issues/96)) ([8e059f9](https://github.com/RealPage/agentic-workflows/commit/8e059f9dae3d0141430e431d0961c96e04a6a0d5)), closes [#95](https://github.com/RealPage/agentic-workflows/issues/95)
+* **tfs-implement:** git am --keep-cr so CRLF files apply cleanly ([#87](https://github.com/RealPage/agentic-workflows/issues/87)) ([30ea76f](https://github.com/RealPage/agentic-workflows/commit/30ea76f7b94915f3b18ce60dcb682a5e9ca56a8c))
+* **wif:** add workspace-id, remove placeholder ANTHROPIC_API_KEY ([#98](https://github.com/RealPage/agentic-workflows/issues/98)) ([d9ad7ca](https://github.com/RealPage/agentic-workflows/commit/d9ad7ca1f387ed75e2595145cf80c3bee0ff7d00)), closes [#95](https://github.com/RealPage/agentic-workflows/issues/95)
+* **wif:** restore placeholder ANTHROPIC_API_KEY in shared engine ([#94](https://github.com/RealPage/agentic-workflows/issues/94)) ([9cbcdcf](https://github.com/RealPage/agentic-workflows/commit/9cbcdcf425e1117314c873f8e99965f03984ee6b))
+
 ## [0.4.0](https://github.com/RealPage/agentic-workflows/compare/v0.3.1...v0.4.0) (2026-04-29)
 
 
