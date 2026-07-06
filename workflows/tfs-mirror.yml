@@ -1,0 +1,171 @@
+name: TFS Mirror Sync
+
+# COMPANION of the tfs-implement-mirrored agentic workflow. This is plain
+# GitHub Actions YAML — `gh aw add` does not distribute it, so copy this file
+# into your consumer repo's .github/workflows/ as-is (no compile step). The
+# canonical copy lives at RealPage/agentic-workflows/workflows/tfs-mirror.yml;
+# check it for updates when you bump the implementer version.
+#
+# Pulls every branch from the on-prem TFS repo (configured via vars.TFS_BASE /
+# vars.TFS_REPO) into GitHub under the `tfs-mirror/<branch>` prefix. GitHub's
+# own `main` is left alone so the `.github/workflows/*` agent files (which only
+# live on GitHub) are preserved.
+#
+# Why prefixed: GitHub is a read-only workspace and TFS is the source of truth,
+# but `.github/workflows` exists only on GitHub. A flat 1:1 mirror would clobber
+# those workflow files on every sync. The two lineages (GitHub `main` and
+# `tfs-mirror/*`) share no history and are never merged in either direction —
+# TFS -> GitHub is the only flow, and it is a one-way force overwrite, so the
+# mirrored commit SHAs are always byte-identical to TFS and cannot diverge.
+#
+# Consumed by: tfs-implement-mirrored (both its clone sites start from
+# refs/heads/tfs-mirror/<target-branch> and fetch only the delta from TFS).
+# The implementer degrades gracefully if this workflow stalls — its TFS fetch
+# closes any gap and it emits a ::warning when the mirror lags — but each run
+# then pays a growing transfer, so keep this workflow healthy.
+#
+# RECOMMENDED: protect the mirror namespace with a repository ruleset on
+# `refs/heads/tfs-mirror/**` that blocks pushes, branch creation, and PRs for
+# everyone except this workflow's identity (or repo admins). Humans committing
+# to mirror refs is the only way the mirror can diverge from TFS — the next
+# sync force-converges it back, but the ruleset prevents the confusion
+# entirely.
+
+on:
+  schedule:
+    # Off-the-hour minutes (3,13,23,33,43,53). GitHub Actions throttles
+    # scheduled workflows that fire on common boundaries like :00, :10, :15.
+    # Staggered against tfs-implement-mirrored's 7,22,37,52 so the
+    # implementer usually runs a few minutes after a fresh sync.
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: tfs-mirror
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    # Steady-state syncs take well under a minute (checkout of existing mirror
+    # refs + delta fetch from TFS). The generous timeout is for the BOOTSTRAP
+    # run on a huge repo, where the initial `git fetch tfs` transfers the
+    # repo's full history from the on-prem server.
+    timeout-minutes: 30
+    steps:
+      - name: Verify required secrets and variables
+        # First-run safety net. Without this, missing config silently resolves
+        # to empty strings and the job fails later with a confusing git error.
+        env:
+          TFS_PAT_SET: ${{ secrets.TFS_PAT != '' }}
+          TFS_BASE_VAR: ${{ vars.TFS_BASE }}
+          TFS_REPO_VAR: ${{ vars.TFS_REPO }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ "$TFS_PAT_SET" = "true" ] || missing+=("secret TFS_PAT")
+          [ -n "$TFS_BASE_VAR" ]      || missing+=("variable TFS_BASE")
+          [ -n "$TFS_REPO_VAR" ]      || missing+=("variable TFS_REPO")
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "All required secrets and variables are present."
+            exit 0
+          fi
+          echo "::error::Workflow not configured. Missing required values:"
+          for v in "${missing[@]}"; do echo "::error::  - $v"; done
+          cat <<'EOF'
+
+          ─────────────────────────────────────────────────────────────────
+          How to configure TFS Mirror Sync
+          ─────────────────────────────────────────────────────────────────
+          Open the repo on GitHub → Settings → Secrets and variables → Actions.
+
+          Add the missing Secrets (tab: Secrets):
+            TFS_PAT      Azure DevOps PAT with Code: Read scope on the target
+                         TFS project. (The tfs-implement workflow already
+                         requires Read & Write — the same secret works.)
+
+          Add the missing Variables (tab: Variables):
+            TFS_BASE     Project base URL, URL-encoded.
+                         e.g. https://tfs.example.com/tfs/Org/Project%20Name
+            TFS_REPO     TFS git repo name.
+                         e.g. loft-core
+          ─────────────────────────────────────────────────────────────────
+          EOF
+          exit 1
+
+      - name: Checkout GitHub repo
+        # fetch-depth: 0 pulls ALL branches including the existing tfs-mirror/*
+        # refs — that is what makes the TFS fetch below incremental: the local
+        # repo already holds the bulk of TFS history (from GitHub, well-peered
+        # to the runner), so `git fetch tfs` transfers only new objects.
+        #
+        # SHA-pinned (not a mutable tag): this workflow holds TFS_PAT and
+        # `contents: write`, so it matches the supply-chain posture of the
+        # compiled gh-aw lock files, which pin the same SHA.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "tfs-mirror-bot"
+          git config user.email "tfs-mirror-bot@users.noreply.github.com"
+
+      - name: Add TFS remote and fetch all branches
+        env:
+          TFS_PAT: ${{ secrets.TFS_PAT }}
+          TFS_BASE: ${{ vars.TFS_BASE }}
+          TFS_REPO: ${{ vars.TFS_REPO }}
+        run: |
+          set -euo pipefail
+          # Pass PAT as Basic auth via http.extraheader, never embed in URL.
+          # `${TFS_PAT}` is a GitHub Actions secret — it's automatically masked in logs.
+          tfs_url="${TFS_BASE}/_git/${TFS_REPO}"
+          tfs_host="${TFS_BASE#*://}"; tfs_host="${tfs_host%%/*}"
+          b64_auth=$(printf ':%s' "$TFS_PAT" | base64 -w0)
+          if git remote | grep -qx tfs; then
+            git remote set-url tfs "$tfs_url"
+          else
+            git remote add tfs "$tfs_url"
+          fi
+          # Configure auth header for tfs remote URL pattern.
+          git config --local "http.https://${tfs_host}/.extraheader" "Authorization: Basic $b64_auth"
+          git fetch tfs '+refs/heads/*:refs/remotes/tfs/*' --prune
+
+      - name: Push TFS branches to GitHub under tfs-mirror/*
+        run: |
+          set -euo pipefail
+          # Push every TFS branch to GitHub as `tfs-mirror/<branch>`. The `+`
+          # (force) makes TFS authoritative: any divergence on the GitHub side
+          # — including a TFS-side history rewrite — converges back to exactly
+          # the TFS state on the next sync. The push transfers the same
+          # immutable objects fetched from TFS, so commit SHAs on GitHub are
+          # byte-identical to TFS.
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            branch="${ref#refs/remotes/tfs/}"
+            [ "$branch" = "HEAD" ] && continue
+            echo "Mirroring tfs/$branch -> origin/tfs-mirror/$branch"
+            git push origin "+${ref}:refs/heads/tfs-mirror/${branch}"
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/tfs/)
+
+      - name: Prune deleted TFS branches from GitHub mirror
+        run: |
+          set -euo pipefail
+          # If a branch exists on GitHub under tfs-mirror/ but no longer exists on TFS, delete it.
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            gh_ref="$(echo "$line" | awk '{print $2}')"
+            branch="${gh_ref#refs/heads/tfs-mirror/}"
+            if ! git show-ref --verify --quiet "refs/remotes/tfs/${branch}"; then
+              echo "Deleting stale mirror branch: tfs-mirror/${branch}"
+              # Non-fatal, but surfaced: a failure here usually means a
+              # ruleset or permission blocks deletion for this identity.
+              git push origin --delete "refs/heads/tfs-mirror/${branch}" \
+                || echo "::warning title=Mirror prune failed::Could not delete refs/heads/tfs-mirror/${branch} — check that rulesets/permissions allow this workflow's identity to delete tfs-mirror/* branches."
+            fi
+          done < <(git ls-remote origin 'refs/heads/tfs-mirror/*' || true)
