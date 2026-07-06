@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/RealPage/agentic-workflows/compare/v0.5.0...v0.6.0) (2026-07-06)
+
+
+### Features
+
+* **tfs-implement:** add mirrored variant for large repos ([1340040](https://github.com/RealPage/agentic-workflows/commit/13400407330523b87667d374fa636085947800b7))
+* **tfs-implement:** add mirrored variant for large repos ([e6b2421](https://github.com/RealPage/agentic-workflows/commit/e6b2421134f85cb114eda95b602a45c27d380d69))
+
+
+### Bug Fixes
+
+* **tfs-implement-mirrored:** apply review findings from loft-core validation ([c83f276](https://github.com/RealPage/agentic-workflows/commit/c83f276ee8d207e0ab94fa2fbc8e092e26195a8b))
+
 ## [0.5.0](https://github.com/RealPage/agentic-workflows/compare/v0.4.0...v0.5.0) (2026-06-22)
 
 
