@@ -288,15 +288,18 @@ steps:
             clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$TFS_WORK"
       else
         echo "::warning title=TFS mirror missing::refs/heads/$MIRROR_BRANCH not present on GitHub — falling back to full TFS fetch. Install/dispatch the 'TFS Mirror Sync' workflow (tfs-mirror.yml) to make runs fast."
-        git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-            clone --no-checkout --depth=1 "$GH_REPO_URL" "$TFS_WORK"
+        # GitHub main shares no objects with TFS content (the two lineages
+        # are disjoint), so cloning it would not reduce the TFS transfer —
+        # start from an empty repo and let the TFS fetch below bring full
+        # history.
+        git init "$TFS_WORK"
       fi
       git -C "$TFS_WORK" config user.email "agent-bot@noreply.local"
       git -C "$TFS_WORK" config user.name "tfs-implement"
 
       # Fetch the target branch from TFS to pick up any commits that landed
       # after the mirror cron last ran. Incremental — the GitHub clone above
-      # already has the bulk of history (unless we hit the fallback).
+      # already has the bulk of history (unless we hit the empty-repo fallback).
       # Explicit refspec so `rev-parse tfs/$TFS_TARGET_BRANCH` below works
       # without relying on the remote's configured fetch refspec.
       git -C "$TFS_WORK" remote add tfs "$TFS_BASE/_git/$TFS_REPO"
@@ -544,16 +547,16 @@ safe-outputs:
             GH_AUTH="Authorization: Basic $GH_B64"
 
             # Probe the mirror ref (see claim step). If present, clone it;
-            # otherwise fall back to a no-checkout GitHub clone and let the
-            # TFS fetch below transfer full history.
+            # otherwise start from an empty repo and let the TFS fetch below
+            # transfer full history — GitHub main shares no objects with TFS
+            # content, so cloning it would not help.
             if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
                    ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
               git -c "http.https://github.com/.extraheader=$GH_AUTH" \
                   clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$PUSH_STAGING"
             else
               echo "Mirror branch $MIRROR_BRANCH not present on GitHub yet — falling back to full TFS fetch."
-              git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-                  clone --no-checkout --depth=1 "$GH_REPO_URL" "$PUSH_STAGING"
+              git init "$PUSH_STAGING"
             fi
             git -C "$PUSH_STAGING" config user.email "agent-bot@noreply.local"
             git -C "$PUSH_STAGING" config user.name  "tfs-implement"
@@ -887,14 +890,47 @@ safe-outputs:
               --data "$COMMENT" \
               "$TFS_BASE/_apis/wit/workitems/$WI_ID/comments?api-version=6.0-preview.3" > /dev/null
 
-            WI=$(curl -fsS -H "$TFS_AUTH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0")
-            REV=$(echo "$WI"  | jq -r '.rev')
-            TAGS=$(echo "$WI" | jq -r '.fields["System.Tags"] // ""')
-            NEW_TAGS=$(echo "$TAGS" | sed 's/agent-in-progress/agent-failed/g')
-            PATCH=$(jq -n --argjson rev "$REV" --arg tags "$NEW_TAGS" \
-              '[{"op":"test","path":"/rev","value":$rev},{"op":"replace","path":"/fields/System.Tags","value":$tags}]')
-            curl -fsS -X PATCH -H "$TFS_AUTH" -H "Content-Type: application/json-patch+json" \
-              --data "$PATCH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0" > /dev/null
+            # Retry loop for the tag transition — same rev-mismatch race as in
+            # tfs-finalize-pull-request (see the comment there). Less likely
+            # on this path (no PR creation triggering async auto-linking), but
+            # the comment POST above bumps System.CommentCount and a
+            # concurrent human edit can bump the rev between our GET and
+            # PATCH; without a retry the WI would be left stuck in
+            # agent-in-progress. Rev mismatch is 412 on Azure DevOps cloud,
+            # 409 + TF26071 on on-prem TFS.
+            WI_PATCH_HTTP_CODE=""
+            WI_PATCH_RESPONSE=$(mktemp)
+            for attempt in 1 2 3 4 5 6 7 8; do
+              WI=$(curl -fsS -H "$TFS_AUTH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0")
+              REV=$(echo "$WI"  | jq -r '.rev')
+              TAGS=$(echo "$WI" | jq -r '.fields["System.Tags"] // ""')
+              NEW_TAGS=$(echo "$TAGS" | sed 's/agent-in-progress/agent-failed/g')
+              PATCH=$(jq -n --argjson rev "$REV" --arg tags "$NEW_TAGS" \
+                '[{"op":"test","path":"/rev","value":$rev},{"op":"replace","path":"/fields/System.Tags","value":$tags}]')
+              WI_PATCH_HTTP_CODE=$(curl -sS -o "$WI_PATCH_RESPONSE" -w "%{http_code}" \
+                -X PATCH -H "$TFS_AUTH" -H "Content-Type: application/json-patch+json" \
+                --data "$PATCH" "$TFS_BASE/_apis/wit/workitems/$WI_ID?api-version=6.0")
+              if [ "$WI_PATCH_HTTP_CODE" = "200" ]; then
+                break
+              fi
+              if [ "$WI_PATCH_HTTP_CODE" = "412" ] || \
+                 { [ "$WI_PATCH_HTTP_CODE" = "409" ] && \
+                   grep -qE "TF26071|WorkItemRevisionMismatchException" "$WI_PATCH_RESPONSE"; }; then
+                echo "WI rev moved between GET and PATCH (attempt $attempt, rev was $REV, HTTP $WI_PATCH_HTTP_CODE) — refetching and retrying."
+                sleep 1
+                continue
+              fi
+              break
+            done
+            if [ "$WI_PATCH_HTTP_CODE" != "200" ]; then
+              echo "ERROR: tag transition to agent-failed failed (HTTP $WI_PATCH_HTTP_CODE) on WI #$WI_ID after retries." >&2
+              echo "TFS response:" >&2
+              cat "$WI_PATCH_RESPONSE" >&2
+              echo "The failure comment was posted; flip the tag to agent-failed manually." >&2
+              rm -f "$WI_PATCH_RESPONSE"
+              exit 1
+            fi
+            rm -f "$WI_PATCH_RESPONSE"
 
             echo "Recorded failure on work item #$WI_ID"
 

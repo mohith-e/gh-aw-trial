@@ -101,7 +101,11 @@ jobs:
         # refs — that is what makes the TFS fetch below incremental: the local
         # repo already holds the bulk of TFS history (from GitHub, well-peered
         # to the runner), so `git fetch tfs` transfers only new objects.
-        uses: actions/checkout@v6
+        #
+        # SHA-pinned (not a mutable tag): this workflow holds TFS_PAT and
+        # `contents: write`, so it matches the supply-chain posture of the
+        # compiled gh-aw lock files, which pin the same SHA.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -159,6 +163,9 @@ jobs:
             branch="${gh_ref#refs/heads/tfs-mirror/}"
             if ! git show-ref --verify --quiet "refs/remotes/tfs/${branch}"; then
               echo "Deleting stale mirror branch: tfs-mirror/${branch}"
-              git push origin --delete "refs/heads/tfs-mirror/${branch}" || true
+              # Non-fatal, but surfaced: a failure here usually means a
+              # ruleset or permission blocks deletion for this identity.
+              git push origin --delete "refs/heads/tfs-mirror/${branch}" \
+                || echo "::warning title=Mirror prune failed::Could not delete refs/heads/tfs-mirror/${branch} — check that rulesets/permissions allow this workflow's identity to delete tfs-mirror/* branches."
             fi
           done < <(git ls-remote origin 'refs/heads/tfs-mirror/*' || true)
