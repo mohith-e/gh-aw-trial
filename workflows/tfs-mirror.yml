@@ -30,6 +30,18 @@ name: TFS Mirror Sync
 # to mirror refs is the only way the mirror can diverge from TFS — the next
 # sync force-converges it back, but the ruleset prevents the confusion
 # entirely.
+#
+# LARGE REPOS: a branch's first-ever mirror push has no existing tfs-mirror/*
+# ref to diff against, so it transfers that branch's *entire* history in one
+# shot. On a repo with a deep/large history this can exceed GitHub's push
+# size or timeout limits and fail with an opaque `RPC failed; HTTP 500`. Set
+# the optional variable TFS_MIRROR_BOOTSTRAP_BRANCH to your long-running
+# branch (e.g. `master`, `main`, `develop`) to have that one branch seeded via
+# a chunked, resumable push before the normal loop runs. Because git objects
+# are shared across branches, seeding one long-running branch this way makes
+# every other branch's first sync cheap too (they mostly diff against the
+# same shared history). Leave unset for repos small enough that a plain push
+# already works — this is a no-op when unset.
 
 on:
   schedule:
@@ -52,9 +64,11 @@ jobs:
     runs-on: ubuntu-latest
     # Steady-state syncs take well under a minute (checkout of existing mirror
     # refs + delta fetch from TFS). The generous timeout is for the BOOTSTRAP
-    # run on a huge repo, where the initial `git fetch tfs` transfers the
-    # repo's full history from the on-prem server.
-    timeout-minutes: 30
+    # run on a huge repo: the initial `git fetch tfs` transfers the repo's
+    # full history from the on-prem server, and — if TFS_MIRROR_BOOTSTRAP_BRANCH
+    # is set — the chunked push below can take a while longer since it trades
+    # push size for many small round trips rather than one large transfer.
+    timeout-minutes: 120
     steps:
       - name: Verify required secrets and variables
         # First-run safety net. Without this, missing config silently resolves
@@ -92,6 +106,12 @@ jobs:
                          e.g. https://tfs.example.com/tfs/Org/Project%20Name
             TFS_REPO     TFS git repo name.
                          e.g. loft-core
+
+          Optional Variables:
+            TFS_MIRROR_BOOTSTRAP_BRANCH   Name of a long-running branch (e.g.
+                         master/main/develop) to seed via chunked push on a
+                         large repo's first sync. See the LARGE REPOS note
+                         near the top of this file. Leave unset otherwise.
           ─────────────────────────────────────────────────────────────────
           EOF
           exit 1
@@ -136,7 +156,63 @@ jobs:
           git config --local "http.https://${tfs_host}/.extraheader" "Authorization: Basic $b64_auth"
           git fetch tfs '+refs/heads/*:refs/remotes/tfs/*' --prune
 
+      - name: Bootstrap large branch via chunked push (optional)
+        env:
+          BOOTSTRAP_BRANCH: ${{ vars.TFS_MIRROR_BOOTSTRAP_BRANCH }}
+        run: |
+          set -euo pipefail
+          # No-op unless TFS_MIRROR_BOOTSTRAP_BRANCH is set — see the
+          # LARGE REPOS note at the top of this file.
+          if [ -z "${BOOTSTRAP_BRANCH:-}" ]; then
+            echo "TFS_MIRROR_BOOTSTRAP_BRANCH not set — skipping chunked bootstrap."
+            exit 0
+          fi
+          if ! git show-ref --verify --quiet "refs/remotes/tfs/${BOOTSTRAP_BRANCH}"; then
+            echo "::warning::TFS_MIRROR_BOOTSTRAP_BRANCH='${BOOTSTRAP_BRANCH}' does not match any branch fetched from TFS — skipping chunked bootstrap."
+            exit 0
+          fi
+          if git ls-remote --exit-code origin "refs/heads/tfs-mirror/${BOOTSTRAP_BRANCH}" >/dev/null 2>&1; then
+            echo "refs/heads/tfs-mirror/${BOOTSTRAP_BRANCH} already exists on GitHub — bootstrap already done, skipping."
+            exit 0
+          fi
+
+          # First-ever push of this branch: walk its history oldest -> newest
+          # and push forward in batches instead of transferring the whole
+          # thing in one shot. Each individual push only needs to fit inside
+          # GitHub's per-push size/timeout budget, not the whole branch.
+          # Object storage is shared across branches, so this doesn't just
+          # bootstrap BOOTSTRAP_BRANCH — every other branch built on the same
+          # lineage becomes a cheap incremental push once this is done.
+          echo "Bootstrapping refs/heads/tfs-mirror/${BOOTSTRAP_BRANCH} via chunked push..."
+          mapfile -t commits < <(git rev-list --reverse "refs/remotes/tfs/${BOOTSTRAP_BRANCH}")
+          total=${#commits[@]}
+          echo "Total commits on ${BOOTSTRAP_BRANCH}: ${total}"
+
+          chunk=500
+          i=0
+          while [ "$i" -lt "$total" ]; do
+            next=$(( i + chunk ))
+            [ "$next" -gt "$total" ] && next=$total
+            sha="${commits[$(( next - 1 ))]}"
+            if git push origin "+${sha}:refs/heads/tfs-mirror/${BOOTSTRAP_BRANCH}" 2>chunk_push_err.log; then
+              echo "  pushed ${next}/${total} commits (through ${sha})"
+              i=$next
+            else
+              cat chunk_push_err.log
+              if [ "$chunk" -le 1 ]; then
+                echo "::error::Chunked bootstrap of '${BOOTSTRAP_BRANCH}' failed even at chunk size 1 (commit ${sha}). A single commit likely exceeds GitHub's push size/timeout limits on its own (e.g. a huge file in that commit) — this needs manual investigation, not a smaller chunk."
+                exit 1
+              fi
+              chunk=$(( chunk / 2 ))
+              [ "$chunk" -lt 1 ] && chunk=1
+              echo "  push failed at chunk size $((chunk * 2)) — retrying from commit $((i + 1)) with chunk size ${chunk}"
+            fi
+          done
+          echo "Bootstrap complete: refs/heads/tfs-mirror/${BOOTSTRAP_BRANCH} now matches the TFS tip."
+
       - name: Push TFS branches to GitHub under tfs-mirror/*
+        env:
+          BOOTSTRAP_BRANCH: ${{ vars.TFS_MIRROR_BOOTSTRAP_BRANCH }}
         run: |
           set -euo pipefail
           # Push every TFS branch to GitHub as `tfs-mirror/<branch>`. The `+`
@@ -150,7 +226,14 @@ jobs:
             branch="${ref#refs/remotes/tfs/}"
             [ "$branch" = "HEAD" ] && continue
             echo "Mirroring tfs/$branch -> origin/tfs-mirror/$branch"
-            git push origin "+${ref}:refs/heads/tfs-mirror/${branch}"
+            if ! git push origin "+${ref}:refs/heads/tfs-mirror/${branch}" 2>push_err.log; then
+              cat push_err.log
+              if [ -z "${BOOTSTRAP_BRANCH:-}" ] && grep -qE "RPC failed|HTTP 5[0-9]{2}|unexpected disconnect" push_err.log; then
+                echo "::error::Push of '${branch}' failed in a way consistent with a large first-time history transfer exceeding GitHub's push size/timeout limits."
+                echo "::error::If this repo has a large long-running branch (e.g. master/main/develop), set the repo variable TFS_MIRROR_BOOTSTRAP_BRANCH to that branch name to enable chunked bootstrap, then re-run this workflow."
+              fi
+              exit 1
+            fi
           done < <(git for-each-ref --format='%(refname)' refs/remotes/tfs/)
 
       - name: Prune deleted TFS branches from GitHub mirror
