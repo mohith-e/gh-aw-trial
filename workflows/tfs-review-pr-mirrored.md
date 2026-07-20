@@ -101,9 +101,14 @@ network:
 env:
   TFS_BASE: ${{ vars.TFS_BASE }}
   TFS_REPO: ${{ vars.TFS_REPO }}
-  # OPTIONAL. If set, only PRs targeting this branch (refs/heads/<value>) are
-  # reviewed; leave unset to review PRs against any target branch.
-  TFS_TARGET_BRANCH: ${{ vars.TFS_TARGET_BRANCH }}
+  # NOTE: this workflow reviews PRs against EVERY target branch (develop,
+  # release-*, etc.) — most repos use several base branches and want them all
+  # reviewed. There is deliberately no single-target-branch filter: the sibling
+  # tfs-implement-mirrored uses vars.TFS_TARGET_BRANCH as a REQUIRED base branch
+  # for the PRs IT opens, so reusing that name here (as a review filter) would
+  # collide and silently narrow reviews to that one branch. If per-branch review
+  # scoping is ever needed, add it under a distinct name (e.g. a comma-separated
+  # TFS_REVIEW_TARGET_BRANCHES), never TFS_TARGET_BRANCH.
   # OPTIONAL rollout gate. Set to "false" to disable the routine schedule-driven
   # scan entirely — the workflow then reviews ONLY PRs carrying a `/review-ai`
   # comment (and manual workflow_dispatch by pr_id). Unset / any other value =
@@ -174,9 +179,6 @@ steps:
         TFS_REPO     TFS git repo name. e.g. loft-core
 
       Optional Variables:
-        TFS_TARGET_BRANCH   Restrict reviews to PRs targeting this branch
-                     (e.g. master/main/develop). Leave unset to review PRs
-                     against any target branch.
         TFS_REVIEW_SCHEDULE_ENABLED
                      "false" disables the routine scheduled scan — only PRs
                      commented `/review-ai` (and manual dispatch by pr_id) get
@@ -229,17 +231,23 @@ steps:
 
       # ---------- 2. Build the candidate PR list (oldest first) ----------
       # A manual dispatch with pr_id reviews exactly that PR. Otherwise scan
-      # active PRs. The optional TFS_TARGET_BRANCH narrows the scan server-side.
+      # active PRs across ALL target branches (develop, release-*, …) — a repo
+      # typically has several base branches and wants PRs against all of them
+      # reviewed; there is deliberately no single-branch filter (see the env
+      # note above). TFS returns newest-first, so `$top=100` means the scan
+      # considers the 100 MOST-RECENTLY-CREATED active PRs; we then sort those
+      # ascending and drain oldest-first. On a repo with a deeper active backlog
+      # than that, the intended scope control is TFS_REVIEW_MAX_AGE_DAYS, which
+      # bounds review to recent PRs (all comfortably inside the newest 100); any
+      # older straggler can still be reviewed on demand via `/review-ai`.
       if [ -n "${PR_INPUT:-}" ]; then
         CANDIDATES=$(curl -fsS -H "$TFS_AUTH" \
           "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests/$PR_INPUT?api-version=6.0" \
           | jq -c 'if .pullRequestId then [.] else [] end')
       else
-        LIST_ARGS=(-G --data-urlencode "searchCriteria.status=active" --data-urlencode "\$top=100")
-        if [ -n "${TFS_TARGET_BRANCH:-}" ]; then
-          LIST_ARGS+=(--data-urlencode "searchCriteria.targetRefName=refs/heads/${TFS_TARGET_BRANCH}")
-        fi
-        CANDIDATES=$(curl -fsS -H "$TFS_AUTH" "${LIST_ARGS[@]}" \
+        CANDIDATES=$(curl -fsS -H "$TFS_AUTH" -G \
+          --data-urlencode "searchCriteria.status=active" \
+          --data-urlencode "\$top=100" \
           "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests?api-version=6.0" \
           | jq -c '[.value[]] | sort_by(.creationDate)')
       fi
