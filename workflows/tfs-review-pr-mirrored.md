@@ -23,6 +23,14 @@ description: |
   skip-ai-review (an explicit request outranks the standing rules). Each
   command is served exactly once.
 
+  Rollout & scope controls (optional repo variables): set
+  TFS_REVIEW_SCHEDULE_ENABLED=false to disable the routine scan and review only
+  /review-ai'd PRs (a safe first-run soak on a busy repo), and
+  TFS_REVIEW_MAX_AGE_DAYS=N to limit the scheduled scan to PRs created in the
+  last N days (for repos with a deep backlog of stale PRs). Both are bypassed by
+  /review-ai and manual dispatch. See the verify step for the authoritative
+  list.
+
   Requires the companion workflows/tfs-mirror.yml (plain GitHub Actions YAML
   that `gh aw add` does not distribute — consumers copy it into
   .github/workflows/ manually) for fast clones on large repos; falls back to
@@ -96,6 +104,20 @@ env:
   # OPTIONAL. If set, only PRs targeting this branch (refs/heads/<value>) are
   # reviewed; leave unset to review PRs against any target branch.
   TFS_TARGET_BRANCH: ${{ vars.TFS_TARGET_BRANCH }}
+  # OPTIONAL rollout gate. Set to "false" to disable the routine schedule-driven
+  # scan entirely — the workflow then reviews ONLY PRs carrying a `/review-ai`
+  # comment (and manual workflow_dispatch by pr_id). Unset / any other value =
+  # scheduled scanning ON. Use "false" for a first-run soak: prove the round-trip
+  # on one PR via /review-ai, then flip to "true" to open scheduled review to the
+  # team. `/review-ai` and manual dispatch are unaffected by this flag.
+  TFS_REVIEW_SCHEDULE_ENABLED: ${{ vars.TFS_REVIEW_SCHEDULE_ENABLED }}
+  # OPTIONAL age filter (positive integer, days). If set, the schedule scan only
+  # reviews non-draft PRs CREATED within this many days — the fix for a repo with
+  # a deep backlog of old, stale PRs (e.g. hundreds going back years) you do not
+  # want auto-reviewed. Unset = no age limit (all active non-draft PRs eligible).
+  # Does NOT apply to `/review-ai` or manual dispatch, which always review the
+  # requested PR regardless of age.
+  TFS_REVIEW_MAX_AGE_DAYS: ${{ vars.TFS_REVIEW_MAX_AGE_DAYS }}
   PR_INPUT: ${{ inputs.pr_id }}
   # Diff-size guard rails, read by the agent from the workspace JSON. A PR
   # bigger than either bound gets a "too large — please split" summary instead
@@ -155,6 +177,19 @@ steps:
         TFS_TARGET_BRANCH   Restrict reviews to PRs targeting this branch
                      (e.g. master/main/develop). Leave unset to review PRs
                      against any target branch.
+        TFS_REVIEW_SCHEDULE_ENABLED
+                     "false" disables the routine scheduled scan — only PRs
+                     commented `/review-ai` (and manual dispatch by pr_id) get
+                     reviewed. Unset / anything else = scheduled review ON. Use
+                     it for a staged rollout: soak on one PR via /review-ai
+                     first, then set "true" to open it to the team.
+        TFS_REVIEW_MAX_AGE_DAYS
+                     Positive integer. The scheduled scan then reviews only
+                     non-draft PRs created within this many days — use it on a
+                     repo with a large backlog of old PRs you don't want
+                     auto-reviewed (e.g. 14). Unset = no age limit. `/review-ai`
+                     and manual dispatch ignore it and review any PR regardless
+                     of age.
 
       Anthropic auth is keyless via WIF — there is no ANTHROPIC_API_KEY. Set
       ANTHROPIC_FEDERATION_RULE_ID + ANTHROPIC_SERVICE_ACCOUNT_ID vars, or
@@ -228,6 +263,28 @@ steps:
       #   (no `agent-reviewed-sha: <sha>` marker). Human and AI-authored PRs
       #   alike — there is deliberately no agent/* or [agentic- skip; a second
       #   independent look at agent-written code is a feature, not noise.
+      #   The SCHEDULE path additionally honors two admin knobs, BOTH bypassed
+      #   by the COMMAND path and by a manual pr_id dispatch: a rollout gate
+      #   (TFS_REVIEW_SCHEDULE_ENABLED=false turns the routine scan off) and an
+      #   age filter (TFS_REVIEW_MAX_AGE_DAYS limits it to recently-created PRs).
+
+      # Normalize the two SCHEDULE-path knobs once. Empty/unset => scheduling ON
+      # and no age limit (backward-compatible defaults, so an existing consumer
+      # that sets neither keeps reviewing every active non-draft PR).
+      SCHEDULE_ENABLED="true"
+      case "$(printf '%s' "${TFS_REVIEW_SCHEDULE_ENABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+        false|0|no|off) SCHEDULE_ENABLED="false" ;;
+      esac
+      CUTOFF=""
+      if [ -n "${TFS_REVIEW_MAX_AGE_DAYS:-}" ]; then
+        case "$TFS_REVIEW_MAX_AGE_DAYS" in
+          ''|*[!0-9]*) echo "::warning::TFS_REVIEW_MAX_AGE_DAYS='${TFS_REVIEW_MAX_AGE_DAYS}' is not a positive integer — ignoring (no age filter)." ;;
+          *) CUTOFF=$(date -u -d "${TFS_REVIEW_MAX_AGE_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+             echo "Schedule age filter: only PRs created on/after $CUTOFF (last ${TFS_REVIEW_MAX_AGE_DAYS}d)." ;;
+        esac
+      fi
+      [ "$SCHEDULE_ENABLED" = "true" ] || echo "Scheduled scan DISABLED (TFS_REVIEW_SCHEDULE_ENABLED=false); only /review-ai and manual dispatch select a PR."
+
       SELECTED=""
       SEL_SRC_SHA=""
       SEL_TRIGGER=""
@@ -273,7 +330,24 @@ steps:
           break
         fi
 
-        # SCHEDULE path.
+        # SCHEDULE path. The rollout gate and age filter apply here only; a
+        # manual workflow_dispatch (PR_INPUT set) is an explicit human request
+        # and bypasses both, exactly like /review-ai above.
+        if [ -z "${PR_INPUT:-}" ]; then
+          if [ "$SCHEDULE_ENABLED" != "true" ]; then
+            echo "PR $PR_ID: scheduled scan disabled — skip (comment /review-ai to force a review)."; continue
+          fi
+          if [ -n "$CUTOFF" ]; then
+            # Compare against CUTOFF (…SSZ, no fractional). Strip creationDate's
+            # fractional seconds first: both are UTC ISO-8601, so string order is
+            # chronological once the precision matches — otherwise a same-second
+            # timestamp like …28.1Z sorts BEFORE …28Z ('.' < 'Z') and reads older.
+            PR_CREATED=$(echo "$PR" | jq -r '.creationDate // ""')
+            if [ "$(echo "$PR" | jq -r --arg c "$CUTOFF" '((.creationDate // "") | sub("\\.[0-9]+Z$"; "Z")) < $c')" = "true" ]; then
+              echo "PR $PR_ID: created $PR_CREATED is older than the ${TFS_REVIEW_MAX_AGE_DAYS}d cutoff — skip (comment /review-ai to force)."; continue
+            fi
+          fi
+        fi
         [ "$IS_DRAFT" = "true" ] && { echo "PR $PR_ID: draft (no /review-ai) — skip."; continue; }
         [ "$HAS_SKIP_LABEL" = "true" ] && { echo "PR $PR_ID: labeled skip-ai-review — skip."; continue; }
         if [ -z "$SRC_SHA" ]; then
