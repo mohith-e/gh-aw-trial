@@ -316,8 +316,24 @@ steps:
         # token so it does not fire on prose that merely mentions it.
         SERVED_CMDS=$(echo "$THREADS" | jq -r '[.value[]?.comments[]?.content // ""] | join("\n")' \
           | grep -oE 'agent-review-command: [0-9]+' | grep -oE '[0-9]+$' | sort -u || true)
-        CMD_IDS=$(echo "$THREADS" | jq -r '.value[]? | select((.comments[0].content // "")
-          | test("(^|[^a-zA-Z0-9/])/review-ai([^a-zA-Z0-9]|$)"; "i")) | .id')
+        # EXCLUDE our own posted threads. Every review summary we post carries an
+        # `agent-reviewed-sha:`/`agent-review-command:` marker AND repeats the
+        # literal `/review-ai` in its footer ("comment `/review-ai` for an
+        # on-demand re-review"). Without this guard the footer makes each summary
+        # we post match the command token above, so the next run sees it as a
+        # fresh unserved command and re-reviews forever — one duplicate post per
+        # tick, even at an unchanged commit and with the schedule gate off (the
+        # COMMAND path bypasses that gate). A genuine command is a human comment,
+        # never one carrying our markers, so drop any thread whose comments
+        # contain them. The served-command dedup below still handles a real
+        # human `/review-ai` thread (its own thread carries no marker; the served
+        # record lives in the separate summary thread).
+        CMD_IDS=$(echo "$THREADS" | jq -r '.value[]?
+          | select((.comments[0].content // "")
+              | test("(^|[^a-zA-Z0-9/])/review-ai([^a-zA-Z0-9]|$)"; "i"))
+          | select([.comments[]?.content // ""] | join("\n")
+              | test("agent-reviewed-sha:|agent-review-command:") | not)
+          | .id')
         CMD_THREAD=""
         for cid in $CMD_IDS; do
           if ! echo "$SERVED_CMDS" | grep -qx "$cid"; then CMD_THREAD="$cid"; break; fi
