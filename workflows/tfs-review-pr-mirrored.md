@@ -522,10 +522,17 @@ steps:
         --argjson changed_files "${CHANGED_FILES:-0}" '
         def clean($n):
           if type == "string" then
-            gsub("<[^>]*>"; " ")
+            # Decode entities BEFORE stripping tags -- otherwise an
+            # encoded tag like `&lt;script&gt;` survives the tag-strip
+            # (it is not literal `<...>` yet) and only becomes a real
+            # tag once decoded afterward. &amp; is decoded first so a
+            # double-encoded payload (`&amp;lt;`) resolves through
+            # &lt; on this same pass instead of surviving intact.
+            gsub("&amp;"; "&")
             | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&quot;"; "\"")
             | gsub("&#39;"; "\u0027") | gsub("&apos;"; "\u0027")
-            | gsub("&nbsp;"; " ") | gsub("&amp;"; "&")
+            | gsub("&nbsp;"; " ")
+            | gsub("<[^>]*>"; " ")
             | gsub("[\u0000-\u0008\u000B-\u001F\u007F]"; "")
             | gsub("[ \t]+"; " ")
             | gsub("\n{3,}"; "\n\n")
@@ -599,11 +606,13 @@ safe-outputs:
           required: false
           description: "The command_thread_id from the workspace JSON, passed through unchanged. Non-empty only when this run was triggered by a /review-ai comment; the handler then tags the review served for that command and replies on the command thread. Leave empty (or omit) for scheduled reviews."
       runs-on: ubuntu-latest
-      # No GitHub scopes needed: this handler only makes TFS REST calls (via
-      # TFS_PAT) — unlike tfs-implement-mirrored's finalize handler it does no
-      # mirror clone, so it never touches GITHUB_TOKEN. Empty `permissions: {}`
-      # gives the run token zero scopes, the tightest posture.
-      permissions: {}
+      # This handler's own TFS writes go via TFS_PAT, never GITHUB_TOKEN —
+      # but gh-aw's injected agent-artifact download step (which fetches
+      # $GH_AW_AGENT_OUTPUT) still runs in this job and needs read scope, so
+      # `contents: read` is kept rather than `permissions: {}` (matching
+      # tfs-implement.md's handler, which keeps it for the same reason).
+      permissions:
+        contents: read
       env:
         TFS_PAT: ${{ secrets.TFS_PAT }}
         TFS_BASE: ${{ vars.TFS_BASE }}
@@ -639,6 +648,17 @@ safe-outputs:
             SUMMARY=$(echo "$INTENT" | jq -r '.summary_markdown // empty')
             INLINE=$(echo "$INTENT" | jq -c '.inline_findings_json // "[]" | fromjson? // []')
             CMD_THREAD=$(echo "$INTENT" | jq -r '.command_thread_id // empty')
+
+            # Idempotency and /review-ai dedup key off the marker patterns
+            # below found in *existing* comment content. Strip any
+            # look-alike text the agent itself put in summary_markdown so
+            # prompt-injected output cannot spoof a marker for an arbitrary
+            # SHA/thread and suppress a future review. The handler-generated
+            # FOOTER below is the only place these markers are allowed to
+            # come from.
+            SUMMARY=$(printf '%s' "$SUMMARY" | sed -E \
+              -e 's/<!--[[:space:]]*agent-(reviewed-sha|review-command)[[:space:]]*:[^>]*-->//g' \
+              -e 's/agent-(reviewed-sha|review-command)[[:space:]]*:[^[:space:]]*//g')
 
             # Defensive validation of agent-supplied fields.
             for pair in "PR_ID=$PR_ID" "SRC_SHA=$SRC_SHA" "SUMMARY=$SUMMARY"; do
@@ -721,6 +741,10 @@ safe-outputs:
             # finding is already in the summary above.
             N=$(echo "$INLINE" | jq 'length')
             echo "Inline findings: $N"
+            if [ "$N" -gt 8 ]; then
+              echo "::warning title=Too many inline findings::Agent emitted $N inline findings; contract caps at 8. Posting only the first 8 — all findings remain in the summary review."
+              N=8
+            fi
             j=0
             while [ "$j" -lt "$N" ]; do
               F=$(echo "$INLINE" | jq -c ".[$j]")
