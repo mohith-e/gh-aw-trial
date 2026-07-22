@@ -17,8 +17,16 @@ on:
         required: true
         type: string
 
-imports:
-  - shared/wif-engine.md
+engine:
+  id: claude
+  auth:
+    type: github-oidc
+    provider: anthropic
+    federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+    # organization-id is the RealPage Anthropic org UUID — same for every GitHub org
+    organization-id: cb16d48f-b95b-4b2c-9e86-a09f46eccb90
+    service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+    workspace-id: wrkspc_011kuRkDngP7B49bQc5AZLVJ
 
 permissions:
   # Expanded from `read-all` to add `id-token: write` for WIF auth (strict mode
