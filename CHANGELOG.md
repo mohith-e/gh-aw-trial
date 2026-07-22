@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/RealPage/agentic-workflows/compare/v0.6.0...v0.7.0) (2026-07-22)
+
+
+### Features
+
+* **tfs-mirror:** make chunked bootstrap truly resumable + robust to transient errors ([4239f31](https://github.com/RealPage/agentic-workflows/commit/4239f316abb5777b657a3eeacc86f4e41bfdb3a2))
+* **tfs-mirror:** support chunked bootstrap for large branches ([34c0caf](https://github.com/RealPage/agentic-workflows/commit/34c0caf12cdc96e5387657454046cb49a1021cb4))
+* **tfs-mirror:** support chunked bootstrap for large branches ([535ccb5](https://github.com/RealPage/agentic-workflows/commit/535ccb54372f5bb53357d100f2f0c4d330a8c3a3))
+
+
+### Bug Fixes
+
+* **workflows:** inline WIF engine auth — gh-aw v0.82.10 breaks shared import ([#120](https://github.com/RealPage/agentic-workflows/issues/120)) ([f41758f](https://github.com/RealPage/agentic-workflows/commit/f41758f735bd3d4a411e129da817488c4fbb38c6))
+
 ## [0.6.0](https://github.com/RealPage/agentic-workflows/compare/v0.5.0...v0.6.0) (2026-07-06)
 
 
