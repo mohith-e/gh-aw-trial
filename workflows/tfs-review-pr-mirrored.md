@@ -62,12 +62,11 @@ description: |
 # ~35% of nominal ticks at this cadence (concurrency serialization plus
 # under-delivery that isn't fully explained even outside confirmed GitHub
 # incidents), so requesting more ticks was low-leverage — it doesn't reliably
-# translate into more actual runs, and at batch-of-one it still caps
-# throughput at whatever a single review costs per tick either way. Throughput
-# is instead addressed by the coordinator/worker fan-out below: one tick scans
-# for up to TFS_REVIEW_BATCH_SIZE distinct eligible PRs and dispatches each as
-# its own isolated workflow_dispatch run, so multiple PRs get reviewed from a
-# single actual tick instead of one.
+# translate into more actual runs, and this workflow still reviews one PR per
+# actual tick either way. A fan-out redesign (dispatch each eligible PR as its
+# own workflow_dispatch run, so multiple PRs get reviewed from one actual
+# tick instead of one) is the intended next step if that ceiling is ever not
+# enough — tracked separately, not part of this change.
 # ──────────────────────────────────────────────────────────────────────────────
 on:
   schedule:
@@ -85,15 +84,24 @@ imports:
 strict: true
 
 # gh-aw already injects `concurrency: group: "gh-aw-${{ github.workflow }}"`
-# into the compiled lock file by default, which serializes runs of this
-# workflow (a schedule tick that fires while a prior run is still going
-# queues rather than running in parallel) — this makes that explicit rather
-# than relying on an implicit framework default, since it's exactly the
-# guard that prevents two overlapping runs from both selecting and reviewing
-# the same not-yet-posted PR (the `agent-reviewed-sha` marker is only written
-# after the handler posts, so a genuinely parallel run would re-select it).
+# into the compiled lock file by default, which serializes ALL runs of this
+# workflow — scheduled or manual, any pr_id — onto one shared lane (a
+# schedule tick that fires while a prior run is still going queues rather
+# than running in parallel). This makes that explicit rather than relying on
+# an implicit framework default, since it's exactly the guard that prevents
+# two overlapping runs from both selecting and reviewing the same
+# not-yet-posted PR (the `agent-reviewed-sha` marker is only written after
+# the handler posts, so a genuinely parallel run would re-select it).
+#
+# Deliberately NOT scoped by pr_id here: this workflow only ever reviews one
+# PR per run, so there's no legitimate case for two runs of it to be in
+# flight at once — including a scheduled run and a manual pr_id dispatch,
+# which could otherwise race on the SAME PR if scoped separately (a real bug
+# caught in review). Per-PR scoping only becomes correct once a run can be
+# genuinely one of several DIFFERENT PRs in flight together, which requires
+# the coordinator/worker fan-out — see that change for the scoped version.
 concurrency:
-  group: "gh-aw-${{ github.workflow }}-${{ inputs.pr_id || 'coordinator' }}"
+  group: "gh-aw-${{ github.workflow }}"
 
 permissions:
   # Minimal. `contents: read` covers the GitHub mirror clone in the select
