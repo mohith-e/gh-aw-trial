@@ -86,6 +86,17 @@ imports:
 
 strict: true
 
+# gh-aw already injects `concurrency: group: "gh-aw-${{ github.workflow }}"`
+# into the compiled lock file by default, which serializes runs of this
+# workflow (a schedule tick that fires while a prior run is still going
+# queues rather than running in parallel) — this makes that explicit rather
+# than relying on an implicit framework default, since it's exactly the
+# guard that prevents two overlapping runs from both selecting and reviewing
+# the same not-yet-posted PR (the `agent-reviewed-sha` marker is only written
+# after the handler posts, so a genuinely parallel run would re-select it).
+concurrency:
+  group: "gh-aw-${{ github.workflow }}"
+
 permissions:
   # Minimal. `contents: read` covers the GitHub mirror clone in the select
   # step and the handler job; `id-token: write` is only for WIF Anthropic auth
