@@ -93,7 +93,7 @@ strict: true
 # the same not-yet-posted PR (the `agent-reviewed-sha` marker is only written
 # after the handler posts, so a genuinely parallel run would re-select it).
 concurrency:
-  group: "gh-aw-${{ github.workflow }}"
+  group: "gh-aw-${{ github.workflow }}-${{ inputs.pr_id || 'coordinator' }}"
 
 permissions:
   # Minimal. `contents: read` covers the GitHub mirror clone in the select
