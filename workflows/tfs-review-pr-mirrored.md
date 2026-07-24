@@ -109,7 +109,7 @@ network:
     - defaults
     - tfs.realpage.com
 
-# Workflow-level env: trusted admin-supplied config only. TFS_PAT is
+# Workflow-level env: trusted admin-supplied config only. TFS_REVIEW_PAT is
 # DELIBERATELY ABSENT here — it lives only in the select step's env and the
 # handler job's env, so it never reaches the agent step's tool surface.
 env:
@@ -149,22 +149,32 @@ env:
 # review, dedupes against already-posted reviews, clones the repo, computes
 # the diff, and hands a credential-free workspace to the agent. All TFS WRITES
 # are mediated by the safe-output handler job (`tfs-post-pr-review`) declared
-# after the agent prompt. Do not bind TFS_PAT at workflow level or in the
-# agent step.
+# after the agent prompt. Do not bind TFS_REVIEW_PAT at workflow level or in
+# the agent step.
 steps:
   - name: Verify required secrets and variables
     # First-run safety net. Without this, missing config silently resolves to
     # empty strings and the job fails later with a confusing curl/git error.
     env:
+      TFS_REVIEW_PAT_SET: ${{ secrets.TFS_REVIEW_PAT != '' }}
+      # Legacy fallback: an existing consumer that only has TFS_PAT (shared
+      # with tfs-implement-mirrored) configured keeps working, just posting
+      # review comments under that PAT's identity instead of a dedicated one.
+      # See the select step and handler job, which both prefer
+      # TFS_REVIEW_PAT and fall back to TFS_PAT via `||`.
       TFS_PAT_SET: ${{ secrets.TFS_PAT != '' }}
       TFS_BASE_VAR: ${{ vars.TFS_BASE }}
       TFS_REPO_VAR: ${{ vars.TFS_REPO }}
     run: |
       set -euo pipefail
       missing=()
-      [ "$TFS_PAT_SET" = "true" ] || missing+=("secret TFS_PAT")
-      [ -n "$TFS_BASE_VAR" ]      || missing+=("variable TFS_BASE")
-      [ -n "$TFS_REPO_VAR" ]      || missing+=("variable TFS_REPO")
+      if [ "$TFS_REVIEW_PAT_SET" != "true" ] && [ "$TFS_PAT_SET" != "true" ]; then
+        missing+=("secret TFS_REVIEW_PAT (or legacy TFS_PAT)")
+      elif [ "$TFS_REVIEW_PAT_SET" != "true" ]; then
+        echo "::warning::TFS_REVIEW_PAT is not set — falling back to TFS_PAT for reviews. Review comments will post under whatever identity TFS_PAT belongs to (likely the same one tfs-implement uses to write code). Set a dedicated TFS_REVIEW_PAT — Code: Read + Pull Request Threads (Contribute to pull requests) scope only, under its own service account — so review comments carry their own identity and the review workflow doesn't hold code-write credentials it never needs."
+      fi
+      [ -n "$TFS_BASE_VAR" ] || missing+=("variable TFS_BASE")
+      [ -n "$TFS_REPO_VAR" ] || missing+=("variable TFS_REPO")
       if [ ${#missing[@]} -eq 0 ]; then
         echo "All required secrets and variables are present."
         exit 0
@@ -179,11 +189,17 @@ steps:
       Open the repo on GitHub → Settings → Secrets and variables → Actions.
 
       Add the missing Secrets (tab: Secrets):
-        TFS_PAT      Azure DevOps PAT with Code: Read + Pull Request Threads
+        TFS_REVIEW_PAT
+                     Azure DevOps PAT with Code: Read + Pull Request Threads
                      (Contribute to pull requests) scope on the target TFS
-                     project. Read-only would let the agent see PRs but not
-                     post the review. If you already run tfs-implement /
-                     tfs-mirror, that PAT (Code: Read & Write) already works.
+                     project — no code-write access needed, this workflow
+                     never pushes. Recommended: create it under its own TFS
+                     service account (e.g. "AI Agent Reviewer") so review
+                     comments carry a distinct identity from whatever account
+                     runs tfs-implement / tfs-mirror. If unset, this workflow
+                     falls back to secret TFS_PAT (shared with those other
+                     workflows) so it still runs, just without a dedicated
+                     identity or the narrower scope.
 
       Add the missing Variables (tab: Variables):
         TFS_BASE     Project base URL, URL-encoded.
@@ -222,13 +238,15 @@ steps:
   - name: Select PR, clone, compute diff
     id: select
     env:
-      TFS_PAT: ${{ secrets.TFS_PAT }}
+      # Prefers the dedicated review PAT; falls back to the shared TFS_PAT
+      # only if TFS_REVIEW_PAT isn't configured (see the verify step above).
+      TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
       # GITHUB_TOKEN clones this repo's mirror refs. Bound here (not at
-      # workflow level) for parity with TFS_PAT scoping.
+      # workflow level) for parity with TFS_REVIEW_PAT scoping.
       GITHUB_TOKEN: ${{ github.token }}
     run: |
       set -euo pipefail
-      TFS_B64="$(printf ':%s' "$TFS_PAT" | base64 -w0)"
+      TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
       TFS_AUTH="Authorization: Basic $TFS_B64"
       TFS_HOST="${TFS_BASE#*://}"; TFS_HOST="${TFS_HOST%%/*}"
       mkdir -p "$RUNNER_TEMP/gh-aw"
@@ -582,9 +600,10 @@ tools:
 
 # The single TFS write path (posting the review comment thread(s)) is mediated
 # by the `tfs-post-pr-review` safe-output handler job declared below. The agent
-# step holds NO TFS credentials: TFS_PAT lives only in the select step's env
-# and this handler's env. Do not bind TFS_PAT at workflow level or in the agent
-# step — doing so would re-expose the credential to the model's tool surface.
+# step holds NO TFS credentials: TFS_REVIEW_PAT lives only in the select
+# step's env and this handler's env. Do not bind TFS_REVIEW_PAT at workflow
+# level or in the agent step — doing so would re-expose the credential to the
+# model's tool surface.
 #
 # `noop`, `missing-tool`, `missing-data`, `report_incomplete`, and
 # `create_issue` (for incomplete-run reporting) are auto-injected by gh-aw with
@@ -620,15 +639,19 @@ safe-outputs:
           required: false
           description: "The command_thread_id from the workspace JSON, passed through unchanged. Non-empty only when this run was triggered by a /review-ai comment; the handler then tags the review served for that command and replies on the command thread. Leave empty (or omit) for scheduled reviews."
       runs-on: ubuntu-latest
-      # This handler's own TFS writes go via TFS_PAT, never GITHUB_TOKEN —
-      # but gh-aw's injected agent-artifact download step (which fetches
-      # $GH_AW_AGENT_OUTPUT) still runs in this job and needs read scope, so
-      # `contents: read` is kept rather than `permissions: {}` (matching
-      # tfs-implement.md's handler, which keeps it for the same reason).
+      # This handler's own TFS writes go via TFS_REVIEW_PAT, never
+      # GITHUB_TOKEN — but gh-aw's injected agent-artifact download step
+      # (which fetches $GH_AW_AGENT_OUTPUT) still runs in this job and needs
+      # read scope, so `contents: read` is kept rather than `permissions: {}`
+      # (matching tfs-implement.md's handler, which keeps it for the same
+      # reason).
       permissions:
         contents: read
       env:
-        TFS_PAT: ${{ secrets.TFS_PAT }}
+        # Same TFS_REVIEW_PAT-preferred, TFS_PAT-fallback precedence as the
+        # select step — both must resolve to the same identity for a given
+        # run, which `||` guarantees since it's evaluated the same way here.
+        TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
         TFS_BASE: ${{ vars.TFS_BASE }}
         TFS_REPO: ${{ vars.TFS_REPO }}
       steps:
@@ -647,7 +670,7 @@ safe-outputs:
         - name: Post review thread(s) to the TFS PR
           run: |
             set -euo pipefail
-            TFS_B64="$(printf ':%s' "$TFS_PAT" | base64 -w0)"
+            TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
             TFS_AUTH="Authorization: Basic $TFS_B64"
 
             # Enforce "exactly one" — gh-aw's safe-outputs.jobs.* schema does
