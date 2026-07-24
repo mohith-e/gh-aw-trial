@@ -49,31 +49,29 @@ description: |
 # branches, not PRs, and force-pushes them under tfs-mirror/*), so this
 # workflow cannot be event-driven off a `pull_request` trigger the way the
 # GitHub-native agent-review-pr is. Instead it POLLS TFS for active PRs on a
-# cron schedule, reviewing exactly one PR per tick. Idempotency (the
-# reviewed-SHA marker, see the select step) is what keeps polling from
-# re-commenting every tick — ticking more often never re-reviews a PR, it only
-# shortens how long an unreviewed PR waits for its turn.
+# cron schedule. Idempotency (the reviewed-SHA marker, see the select step)
+# is what keeps polling from re-commenting every tick.
 #
-# Every-5-minutes (12 ticks/hour, 4,9,14,19,24,29,34,39,44,49,54,59): raised
-# from the original every-15-minutes (9,24,39,54, still a subset of this set)
-# to drain the review backlog faster and keep pace with bursts of dev activity
-# without batching multiple PRs into one run (see the workflow description for
-# why: a single-PR-per-run design keeps each run's blast radius small and
-# avoids the all-or-nothing risk of a bigger batch losing everything on a
-# timeout). At batch-of-one this caps throughput at 12 reviews/hour/repo; if
-# that's ever not enough for a repo's real PR volume, the intended next step is
-# a fan-out redesign (dispatch each eligible PR as its own workflow_dispatch
-# run), not a bigger batch in one run — see the workflow description.
+# Off-the-hour minutes (9,24,39,54): GitHub Actions throttles workflows firing
+# on common boundaries like :00, :10, :15 — and these are staggered a few
+# minutes after tfs-mirror.yml's 3,13,23,33,43,53 so a review usually runs
+# against a freshly-synced mirror, and off tfs-implement-mirrored's 7,22,37,52.
 #
-# The offset (+4 mod 5) keeps every tick off :00/:05/:10/... — GitHub Actions
-# throttles workflows firing on those common boundaries — and keeps the
-# original 9,24,39,54 slots intact, staggered a few minutes after
-# tfs-mirror.yml's 3,13,23,33,43,53 (offset +3 mod 5) and off
-# tfs-implement-mirrored's 7,22,37,52 (offset +2 mod 5).
+# Deliberately NOT raised to a tighter cadence: real run-history data on the
+# two RP-Leasing consumer repos showed the platform already delivers only
+# ~35% of nominal ticks at this cadence (concurrency serialization plus
+# under-delivery that isn't fully explained even outside confirmed GitHub
+# incidents), so requesting more ticks was low-leverage — it doesn't reliably
+# translate into more actual runs, and at batch-of-one it still caps
+# throughput at whatever a single review costs per tick either way. Throughput
+# is instead addressed by the coordinator/worker fan-out below: one tick scans
+# for up to TFS_REVIEW_BATCH_SIZE distinct eligible PRs and dispatches each as
+# its own isolated workflow_dispatch run, so multiple PRs get reviewed from a
+# single actual tick instead of one.
 # ──────────────────────────────────────────────────────────────────────────────
 on:
   schedule:
-    - cron: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"
+    - cron: "9,24,39,54 * * * *"
   workflow_dispatch:
     inputs:
       pr_id:
