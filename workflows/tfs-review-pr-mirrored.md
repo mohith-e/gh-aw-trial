@@ -932,6 +932,18 @@ safe-outputs:
           type: boolean
           required: true
           description: "Always pass true. This job ignores the value — it performs its own TFS scan rather than trusting anything from the agent — but the tool call needs at least one declared field."
+      # Deterministic coordinator-only gate — gh-aw already restricts this job
+      # to runs where the agent emitted a matching tfs_dispatch_worker_reviews
+      # intent, but that alone trusts the model's self-reported mode. A
+      # worker run (inputs.pr_id set) could still emit that same intent if
+      # mis-prompted or compromised, which would fire an unwanted scan+dispatch
+      # from a worker context. inputs.pr_id is set by the trigger itself, not
+      # the agent, so this can't be spoofed by anything the model emits.
+      # Written WITHOUT ${{ }} deliberately: gh-aw ANDs this onto its own
+      # bare-expression base gate ((!cancelled()) && ... && contains(...)) —
+      # wrapping this in ${{ }} would mix bare and wrapped expression syntax
+      # in the same if:, which GitHub Actions rejects.
+      if: inputs.pr_id == ''
       runs-on: ubuntu-latest
       # actions: write is what lets this job dispatch worker runs — safe here
       # specifically because this is NOT the agent job (see the permissions
@@ -1094,8 +1106,16 @@ safe-outputs:
             # consumers may name their compiled stub differently.
             WORKFLOW_FILE=$(printf '%s' "$GITHUB_WORKFLOW_REF" | sed -E 's#^[^/]+/[^/]+/\.github/workflows/##; s#@.*$##')
             DISPATCHED=0
+            # --ref pins workers to the SAME ref this coordinator run used.
+            # Without it, `gh workflow run` dispatches on the repo's default
+            # branch regardless of what triggered the coordinator — harmless
+            # for a real schedule/dispatch tick (which only ever fires off
+            # the default branch anyway), but it silently sends worker runs
+            # to the wrong branch for a manual coordinator dispatch on a
+            # non-default ref (e.g. testing this workflow itself before
+            # merge). GITHUB_REF_NAME is a default Actions env var.
             for pr_id in ${TO_DISPATCH[@]+"${TO_DISPATCH[@]}"}; do
-              if gh workflow run "$WORKFLOW_FILE" --repo "$GITHUB_REPOSITORY" -f "pr_id=$pr_id"; then
+              if gh workflow run "$WORKFLOW_FILE" --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f "pr_id=$pr_id"; then
                 DISPATCHED=$((DISPATCHED + 1))
               else
                 echo "::warning title=Dispatch failed::Could not dispatch a worker run for PR $pr_id; it remains eligible and will be retried next tick."
