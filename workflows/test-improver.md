@@ -44,24 +44,13 @@ permissions:
   statuses: read
   id-token: write
 
-# RealPage adaptation (2026-07-27): engine pinned to Claude authenticated via
-# Workload Identity Federation — no ANTHROPIC_API_KEY anywhere. Source:
-# githubnext/agentics/workflows/test-improver.md @ main. Only this engine
-# block differs from upstream.
-engine:
-  id: claude
-  auth:
-    type: github-oidc
-    provider: anthropic
-    federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-    # organization-id is the RealPage Anthropic org UUID — same for every GitHub org
-    organization-id: cb16d48f-b95b-4b2c-9e86-a09f46eccb90
-    service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-    workspace-id: wrkspc_011kuRkDngP7B49bQc5AZLVJ
-  env:
-    # Routing signal only — awf sets ANTHROPIC_BASE_URL only when this is present.
-    # Not a real key; the proxy authenticates via WIF. (gh-aw-firewall#4117)
-    ANTHROPIC_API_KEY: "sk-ant-placeholder-key-for-credential-isolation"
+# RealPage adaptation (2026-07-27): Claude via Workload Identity Federation —
+# no ANTHROPIC_API_KEY anywhere. Auth lives in the shared engine import
+# (see docs/wif-auth.md); upstream's `permissions: read-all` became an explicit
+# read-only map because WIF requires id-token: write. Everything else matches
+# githubnext/agentics/workflows/test-improver.md @ main.
+imports:
+  - shared/wif-engine.md
 
 network:
   allowed:
