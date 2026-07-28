@@ -18,7 +18,7 @@ The following resources are already provisioned for the `RealPage` GitHub org an
 
 The `organization-id` (Anthropic org UUID) is `cb16d48f-b95b-4b2c-9e86-a09f46eccb90` — the same for every GitHub org under the same Anthropic organization.
 
-These IDs are hardcoded in each workflow's inline `engine:` block (`organization-id` and `workspace-id`) and referenced from `ANTHROPIC_FEDERATION_RULE_ID` / `ANTHROPIC_SERVICE_ACCOUNT_ID` org-level Actions variables. The canonical block is preserved in `workflows/shared/wif-engine.md` (now deprecated/reference-only — see `docs/wif-auth.md`). Repos under other GitHub orgs need their own federation rule (see below) but share this workspace and org ID.
+These IDs live in the shared `engine:` block (`organization-id` and `workspace-id`) that every workflow imports from `workflows/shared/wif-engine.md`, and are referenced from `ANTHROPIC_FEDERATION_RULE_ID` / `ANTHROPIC_SERVICE_ACCOUNT_ID` org-level Actions variables — see `docs/wif-auth.md`. Repos under other GitHub orgs need their own federation rule (see below) but share this workspace and org ID.
 
 ---
 
@@ -143,7 +143,7 @@ Shows recent token exchange attempts — check here first when a workflow run re
 
 | Limitation | Detail |
 |---|---|
-| Default workspace | Has no `wrkspc_` ID in the Console — omit `workspace-id` from the inline `engine:` block if targeting the default workspace. |
+| Default workspace | Has no `wrkspc_` ID in the Console — omit `workspace-id` from the shared `engine:` block if targeting the default workspace. |
 
 ---
 

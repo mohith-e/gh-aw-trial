@@ -1,19 +1,22 @@
 ---
-# DEPRECATED — NO LONGER IMPORTED (retained for reference only).
+# Shared Claude engine + WIF auth, imported so the auth config lives in exactly
+# one place (engine defined ONCE across the workflow and all its imports). An
+# importing workflow must NOT declare its own `engine:` block — not even a
+# partial one.
 #
-# gh-aw v0.82.10 (2026-07-16) introduced a behavior-defined engine model whose
-# imported `auth:` is parsed as a sequence of OAuth secret-bindings and cannot
-# express Anthropic WIF fields. Importing this shared engine therefore fails to
-# compile ("mapping was used where sequence is expected"). The WIF auth block is
-# now INLINED into each workflow's own `engine:` frontmatter instead.
+# Requires gh-aw >= v0.83.2. v0.82.10 through v0.83.1 rejected an imported WIF
+# `auth:` mapping ("mapping was used where sequence is expected") because
+# `EngineDefinition.Auth` is a sequence; github/gh-aw#47294, fixed by #47572.
+# During that window this block was inlined into each workflow instead.
 #
-# Last worked on gh-aw v0.82.9. Upstream regression: github/gh-aw#47294.
-# The inline object auth below still works on any gh-aw version that supports
-# Anthropic WIF (≥ v0.79.6) — copy the `engine:` block below (NOT the `---`
-# delimiters) into a workflow's own frontmatter rather than importing this file.
+# `gh aw add` fetches this file alongside the workflow, so consumers get it
+# automatically — verified on v0.83.4 against a scratch repo.
 #
-# Originally: shared Claude engine + WIF auth, imported so the auth config lived
-# in exactly one place (engine defined ONCE across the workflow and its imports).
+# A workflow needing engine-level extras cannot import this file:
+#   - `max-turns` — move it to the ROOT level and the import works.
+#   - `engine.env` — no import-compatible equivalent; `sandbox.agent.env` is
+#     refused by strict mode as an internal implementation detail, so such a
+#     workflow must keep the whole `engine:` block inline.
 engine:
   id: claude
   auth:
