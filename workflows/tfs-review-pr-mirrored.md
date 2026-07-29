@@ -353,8 +353,32 @@ steps:
       DIFF_PATH="$RUNNER_TEMP/gh-aw/pr.diff"
       TFS_WORK="$GITHUB_WORKSPACE/tfs-work"
 
+      # Retry options for READ-ONLY TFS calls, applied to every GET in this
+      # workflow. Observed in production, not theoretical: three of roughly a
+      # dozen coordinator ticks on one consumer repo inside 7 hours hard-failed
+      # on a transient `curl: (28) Failed to connect to tfs.realpage.com` after
+      # ~133s of connect wait. A failed read loses nothing — the PRs stay
+      # eligible and the next tick re-picks them — so retrying turns a blip
+      # into a few seconds of delay instead of a red run, while a genuine
+      # sustained TFS outage still fails loudly rather than reporting success
+      # with zero reviews posted. Notes on the specific flags:
+      #   --connect-timeout is as much of the fix as the retry itself: without
+      #     it a single connect attempt can stall ~133s, long enough that
+      #     retries never meaningfully get their turn.
+      #   --retry-all-errors, not plain --retry: --retry covers only timeouts
+      #     (exit 28, what was observed) and would miss the sibling
+      #     CURLE_COULDNT_CONNECT (exit 7); --retry-connrefused widens that to
+      #     ECONNREFUSED only. The tradeoff is that with -f a genuine 4xx (say
+      #     a bad manual pr_id) is now retried too, so a legitimately-failing
+      #     call takes ~15s longer to give up. Acceptable for a scan that runs
+      #     unattended on a schedule.
+      # DELIBERATELY NOT applied to the POSTs that create review threads (see
+      # the tfs-post-pr-review handler): a write that times out AFTER TFS has
+      # already processed it would double-post the review on retry.
+      CURL_READ=(--connect-timeout 20 --retry 3 --retry-delay 5 --retry-all-errors)
+
       # ---------- 1. Resolve repo id ----------
-      REPO_ID=$(curl -fsS -H "$TFS_AUTH" \
+      REPO_ID=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
         "$TFS_BASE/_apis/git/repositories/$TFS_REPO?api-version=6.0" | jq -r '.id')
       if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
         echo "::error::Could not resolve TFS repo id for '$TFS_REPO'." >&2; exit 1
@@ -372,11 +396,11 @@ steps:
       # bounds review to recent PRs (all comfortably inside the newest 100); any
       # older straggler can still be reviewed on demand via `/review-ai`.
       if [ -n "${PR_INPUT:-}" ]; then
-        CANDIDATES=$(curl -fsS -H "$TFS_AUTH" \
+        CANDIDATES=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
           "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests/$PR_INPUT?api-version=6.0" \
           | jq -c 'if .pullRequestId then [.] else [] end')
       else
-        CANDIDATES=$(curl -fsS -H "$TFS_AUTH" -G \
+        CANDIDATES=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" -G \
           --data-urlencode "searchCriteria.status=active" \
           --data-urlencode "\$top=100" \
           "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests?api-version=6.0" \
@@ -438,7 +462,7 @@ steps:
         SRC_SHA=$(echo "$PR" | jq -r '.lastMergeSourceCommit.commitId // ""')
         HAS_SKIP_LABEL=$(echo "$PR" | jq -r '[.labels[]?.name // empty] | any(. == "skip-ai-review")')
 
-        THREADS=$(curl -fsS -H "$TFS_AUTH" \
+        THREADS=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
           "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0")
 
         # COMMAND path: find an unserved `/review-ai` command thread. A command
@@ -811,7 +835,14 @@ safe-outputs:
             fi
             case "$CMD_THREAD" in *[!0-9]*) CMD_THREAD="";; esac  # ignore anything non-numeric
 
-            REPO_ID=$(curl -fsS -H "$TFS_AUTH" \
+            # Read-only retry options — same rationale as the select step's
+            # CURL_READ (see there). Applied ONLY to the two GETs below. The
+            # thread-creating POSTs further down stay deliberately un-retried:
+            # one that times out after TFS already accepted it would post the
+            # review twice.
+            CURL_READ=(--connect-timeout 20 --retry 3 --retry-delay 5 --retry-all-errors)
+
+            REPO_ID=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
               "$TFS_BASE/_apis/git/repositories/$TFS_REPO?api-version=6.0" | jq -r '.id')
             THREADS_URL="$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0"
 
@@ -819,7 +850,7 @@ safe-outputs:
             # the same PR before either posted). A command-triggered review is
             # deduped by its command thread id; a scheduled one by the SHA.
             SHA_MARKER="agent-reviewed-sha: $SRC_SHA"
-            EXISTING=$(curl -fsS -H "$TFS_AUTH" "$THREADS_URL")
+            EXISTING=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" "$THREADS_URL")
             if [ -n "$CMD_THREAD" ]; then
               CMD_MARKER="agent-review-command: $CMD_THREAD"
               if echo "$EXISTING" | jq -e --arg m "$CMD_MARKER" \
@@ -992,8 +1023,15 @@ safe-outputs:
             TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
             TFS_AUTH="Authorization: Basic $TFS_B64"
 
+            # Read-only retry options — same rationale as the select step's
+            # CURL_READ (see there). This job is where the observed
+            # `curl: (28)` coordinator failures actually happened: every call
+            # it makes to TFS is a GET, so all of them are retried, and this
+            # job posts nothing to TFS at all.
+            CURL_READ=(--connect-timeout 20 --retry 3 --retry-delay 5 --retry-all-errors)
+
             # ---------- 1. Resolve repo id ----------
-            REPO_ID=$(curl -fsS -H "$TFS_AUTH" \
+            REPO_ID=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
               "$TFS_BASE/_apis/git/repositories/$TFS_REPO?api-version=6.0" | jq -r '.id')
             if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
               echo "::error::Could not resolve TFS repo id for '$TFS_REPO'." >&2; exit 1
@@ -1003,7 +1041,7 @@ safe-outputs:
             # Same scan a worker's own schedule path uses — see that step's
             # comment for why $top=100 and oldest-first draining are the
             # intended scope controls.
-            CANDIDATES=$(curl -fsS -H "$TFS_AUTH" -G \
+            CANDIDATES=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" -G \
               --data-urlencode "searchCriteria.status=active" \
               --data-urlencode "\$top=100" \
               "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests?api-version=6.0" \
@@ -1053,7 +1091,7 @@ safe-outputs:
               SRC_SHA=$(echo "$PR" | jq -r '.lastMergeSourceCommit.commitId // ""')
               HAS_SKIP_LABEL=$(echo "$PR" | jq -r '[.labels[]?.name // empty] | any(. == "skip-ai-review")')
 
-              THREADS=$(curl -fsS -H "$TFS_AUTH" \
+              THREADS=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
                 "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0")
 
               # COMMAND path — identical matching/dedup rules to a worker run.
