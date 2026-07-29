@@ -190,16 +190,11 @@ env:
   # Does NOT apply to `/review-ai` or manual dispatch, which always review the
   # requested PR regardless of age.
   TFS_REVIEW_MAX_AGE_DAYS: ${{ vars.TFS_REVIEW_MAX_AGE_DAYS }}
-  # OPTIONAL fan-out width (positive integer). A schedule tick (or a manual
-  # dispatch with no pr_id) is a COORDINATOR run: it scans for eligible PRs
-  # exactly like the schedule path below, but instead of reviewing the first
-  # match itself, it dispatches up to this many as separate, isolated
-  # workflow_dispatch WORKER runs (each with pr_id set), so multiple PRs get
-  # reviewed from one actual tick instead of one. Unset or invalid = 5. Start
-  # modest and raise it while watching worker queue times — a large batch
-  # concentrates dispatch demand instantly, and Anthropic/TFS/runner capacity
-  # may bite before the batch size does.
-  TFS_REVIEW_BATCH_SIZE: ${{ vars.TFS_REVIEW_BATCH_SIZE }}
+  # NOTE: vars.TFS_REVIEW_BATCH_SIZE is deliberately NOT bound here. Nothing
+  # in this job reads it — the fan-out it controls happens entirely in the
+  # tfs-dispatch-worker-reviews handler job, which declares it in its own env
+  # (workflow-level env does not reach handler jobs). See that job for what
+  # the value does.
   PR_INPUT: ${{ inputs.pr_id }}
   # Diff-size guard rails, read by the agent from the workspace JSON. A PR
   # bigger than either bound gets a "too large — please split" summary instead
@@ -209,15 +204,19 @@ env:
   MAX_DIFF_FILES: "40"
 
 # Two mutually-exclusive pre-agent steps, gated on whether pr_id was
-# supplied — a run is either a COORDINATOR (no pr_id: scans TFS and
-# dispatches up to TFS_REVIEW_BATCH_SIZE worker runs, reviews nothing itself)
-# or a WORKER (pr_id set: reviews exactly that one PR — this is the
-# original, unchanged single-PR path, now reached either by a coordinator's
-# dispatch or by a human's manual pr_id dispatch). Both run with the PAT;
-# only the worker path clones the repo, computes a diff, and hands a
-# credential-free workspace to the agent. All TFS WRITES are mediated by the
-# safe-output handler job (`tfs-post-pr-review`) declared after the agent
-# prompt. Do not bind TFS_REVIEW_PAT at workflow level or in the agent step.
+# supplied — a run is either a COORDINATOR (no pr_id: reviews nothing itself;
+# its TFS scan and fan-out of up to TFS_REVIEW_BATCH_SIZE worker runs happen
+# later, in the tfs-dispatch-worker-reviews handler job) or a WORKER (pr_id
+# set: reviews exactly that one PR — this is the original, unchanged
+# single-PR path, now reached either by a coordinator's dispatch or by a
+# human's manual pr_id dispatch). Only the WORKER path touches the PAT: it
+# binds TFS_REVIEW_PAT in its own step env to clone the repo and compute a
+# diff, then hands a credential-free workspace to the agent. The coordinator
+# step binds no credentials at all — the PAT its scan needs lives solely in
+# the handler job's env, so in a coordinator run this job never sees it. All
+# TFS WRITES are mediated by the safe-output handler job
+# (`tfs-post-pr-review`) declared after the agent prompt. Do not bind
+# TFS_REVIEW_PAT at workflow level or in the agent step.
 steps:
   - name: Verify required secrets and variables
     # First-run safety net. Without this, missing config silently resolves to
@@ -959,6 +958,15 @@ safe-outputs:
         TFS_REPO: ${{ vars.TFS_REPO }}
         TFS_REVIEW_SCHEDULE_ENABLED: ${{ vars.TFS_REVIEW_SCHEDULE_ENABLED }}
         TFS_REVIEW_MAX_AGE_DAYS: ${{ vars.TFS_REVIEW_MAX_AGE_DAYS }}
+        # OPTIONAL fan-out width (positive integer), read only here — this is
+        # the job that actually scans and dispatches. Instead of reviewing the
+        # first eligible match itself, a coordinator run dispatches up to this
+        # many eligible PRs as separate, isolated workflow_dispatch WORKER runs
+        # (each with pr_id set), so multiple PRs get reviewed from one tick
+        # instead of one. Unset or invalid = 5. Start modest and raise it while
+        # watching worker queue times — a large batch concentrates dispatch
+        # demand instantly, and Anthropic/TFS/runner capacity may bite before
+        # the batch size does.
         TFS_REVIEW_BATCH_SIZE: ${{ vars.TFS_REVIEW_BATCH_SIZE }}
         # workflow_dispatch is an explicit, documented exception to
         # GITHUB_TOKEN's no-recursive-triggers rule (see
