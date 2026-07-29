@@ -192,9 +192,8 @@ env:
   TFS_REVIEW_MAX_AGE_DAYS: ${{ vars.TFS_REVIEW_MAX_AGE_DAYS }}
   # NOTE: vars.TFS_REVIEW_BATCH_SIZE is deliberately NOT bound here. Nothing
   # in this job reads it — the fan-out it controls happens entirely in the
-  # tfs-dispatch-worker-reviews handler job, which declares it in its own env
-  # (workflow-level env does not reach handler jobs). See that job for what
-  # the value does.
+  # tfs-dispatch-worker-reviews handler job, which declares it in its own env.
+  # See that job for what the value does.
   PR_INPUT: ${{ inputs.pr_id }}
   # Diff-size guard rails, read by the agent from the workspace JSON. A PR
   # bigger than either bound gets a "too large — please split" summary instead
