@@ -1,8 +1,8 @@
 ---
 description: |
-  TFS (Azure DevOps) pull-request reviewer — MIRRORED variant for large repos.
-  Polls a TFS repo for active pull requests on a schedule, reviews PRs for
-  correctness, security, and repo-pattern consistency with an AI agent, and
+  TFS (Azure DevOps) pull-request reviewer. Polls a TFS repo for active pull
+  requests on a schedule, reviews PRs for correctness, security, and
+  repo-pattern consistency with an AI agent, and
   posts the review back onto the TFS PR as comment thread(s). The agent runs
   WITHOUT TFS credentials; a safe-output handler job holding the PAT performs
   every TFS write.
@@ -20,10 +20,10 @@ description: |
   was measured against). Multiple PRs per real tick, not more real ticks, is
   the throughput lever.
 
-  Sibling of tfs-implement-mirrored — same WIF auth, same GitHub-mirror-clone
-  + TFS delta-fetch transport, same PAT-scoping discipline. A worker reviews
-  the OLDEST active PR whose current source commit has not yet been
-  reviewed; a backlog drains over successive coordinator dispatches. It is
+  Sibling of tfs-implement — same WIF auth, same selectable clone transport,
+  same PAT-scoping discipline. A worker reviews the OLDEST active PR whose
+  current source commit has not yet been reviewed; a backlog drains over
+  successive coordinator dispatches. It is
   idempotent: the reviewed source-commit SHA is recorded in the posted
   comment (both as a machine marker and as a human-readable "reviewed at
   commit" line), so it never double-comments and re-reviews a PR only after
@@ -50,12 +50,14 @@ description: |
   /review-ai and manual dispatch. See the verify step for the authoritative
   list.
 
-  Requires the companion workflows/tfs-mirror.yml (plain GitHub Actions YAML
-  that `gh aw add` does not distribute — consumers copy it into
-  .github/workflows/ manually) for fast clones on large repos; falls back to
-  a full TFS fetch if the mirror ref is missing. TFS is authoritative — the
-  reviewed diff is computed from commits fetched fresh from TFS, never from
-  the possibly-stale mirror ref, which is transport only.
+  Clone transport is selectable via TFS_USE_MIRROR. On a large repo where a
+  direct TFS clone dominates run time, install the companion
+  workflows/tfs-mirror.yml (plain GitHub Actions YAML that `gh aw add` does
+  not distribute — consumers copy it into .github/workflows/ manually) and the
+  workflow clones its mirror ref instead, fetching only the delta from TFS.
+  Without it the clone comes straight from TFS. TFS is authoritative either
+  way — the reviewed diff is computed from commits fetched fresh from TFS,
+  never from the possibly-stale mirror ref, which is transport only.
 
   Advisory only: the agent comments, it never votes on or blocks the PR — a
   human is always the decider (the analog of agent-review-pr's "never
@@ -64,17 +66,17 @@ description: |
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 #
-# There is no GitHub event for a TFS PR (the companion tfs-mirror.yml mirrors
-# branches, not PRs, and force-pushes them under tfs-mirror/*), so this
-# workflow cannot be event-driven off a `pull_request` trigger the way the
-# GitHub-native agent-review-pr is. Instead it POLLS TFS for active PRs on a
+# There is no GitHub event for a TFS PR (tfs-mirror.yml, where installed,
+# mirrors branches rather than PRs), so this workflow cannot be event-driven
+# off a `pull_request` trigger the way the GitHub-native agent-review-pr is.
+# Instead it POLLS TFS for active PRs on a
 # cron schedule. Idempotency (the reviewed-SHA marker, see the select step)
 # is what keeps polling from re-commenting every tick.
 #
 # Off-the-hour minutes (9,24,39,54): GitHub Actions throttles workflows firing
 # on common boundaries like :00, :10, :15 — and these are staggered a few
 # minutes after tfs-mirror.yml's 3,13,23,33,43,53 so a review usually runs
-# against a freshly-synced mirror, and off tfs-implement-mirrored's 7,22,37,52.
+# against a freshly-synced mirror, and off tfs-implement's 7,22,37,52.
 #
 # Deliberately NOT a tighter cadence: real run-history data on the two
 # RP-Leasing consumer repos showed the platform already delivers only ~35% of
@@ -98,6 +100,9 @@ on:
 
 imports:
   - shared/wif-engine.md
+  - shared/tfs/core.md
+  - shared/tfs/post-pr-review.md
+  - shared/tfs/dispatch-worker-reviews.md
 
 # Distinguishes a coordinator run (scan + dispatch, no pr_id) from a worker
 # run (reviews one specific PR) in the Actions run list — purely cosmetic.
@@ -140,38 +145,21 @@ permissions:
   # permissions... all writes must go through safe-outputs"). That's why
   # dispatching worker runs lives in the tfs-dispatch-worker-reviews
   # safe-outputs job below (its own permissions, actions: write), not here.
-  # `contents: read` covers the GitHub mirror clone in the select step and
+  # `contents: read` covers the mirror clone in the clone step and
   # the handler jobs; `id-token: write` is only for WIF Anthropic auth
   # (strict mode requires the long form — the `read-all` shorthand can't
   # carry id-token).
   contents: read
   id-token: write
 
-# ── Network allow-list ────────────────────────────────────────────────────────
-#
-# `defaults` covers GitHub itself (the mirror clone needs it). The TFS host is
-# added explicitly. gh-aw resolves frontmatter at compile time, so
-# `${{ vars.TFS_BASE }}` does NOT work here — the host is hardcoded and must
-# match the host portion of vars.TFS_BASE. If your team is on a different TFS /
-# Azure DevOps host (e.g. dev.azure.com), override this list in your consumer
-# stub and update vars.TFS_BASE to match. Keep the list as narrow as possible —
-# it is the primary exfiltration guard for a workflow that handles a TFS PAT.
-# ──────────────────────────────────────────────────────────────────────────────
-network:
-  allowed:
-    - defaults
-    - tfs.realpage.com
-
 # Workflow-level env: trusted admin-supplied config only. TFS_REVIEW_PAT is
 # DELIBERATELY ABSENT here — it lives only in the select step's env and the
 # handler job's env, so it never reaches the agent step's tool surface.
 env:
-  TFS_BASE: ${{ vars.TFS_BASE }}
-  TFS_REPO: ${{ vars.TFS_REPO }}
   # NOTE: this workflow reviews PRs against EVERY target branch (develop,
   # release-*, etc.) — most repos use several base branches and want them all
   # reviewed. There is deliberately no single-target-branch filter: the sibling
-  # tfs-implement-mirrored uses vars.TFS_TARGET_BRANCH as a REQUIRED base branch
+  # tfs-implement uses vars.TFS_TARGET_BRANCH as a REQUIRED base branch
   # for the PRs IT opens, so reusing that name here (as a review filter) would
   # collide and silently narrow reviews to that one branch. If per-branch review
   # scoping is ever needed, add it under a distinct name (e.g. a comma-separated
@@ -223,7 +211,7 @@ steps:
     env:
       TFS_REVIEW_PAT_SET: ${{ secrets.TFS_REVIEW_PAT != '' }}
       # Legacy fallback: an existing consumer that only has TFS_PAT (shared
-      # with tfs-implement-mirrored) configured keeps working, just posting
+      # with tfs-implement) configured keeps working, just posting
       # review comments under that PAT's identity instead of a dedicated one.
       # See the select step and handler job, which both prefer
       # TFS_REVIEW_PAT and fall back to TFS_PAT via `||`.
@@ -249,7 +237,7 @@ steps:
       cat <<'EOF'
 
       ─────────────────────────────────────────────────────────────────
-      How to configure TFS PR Review (Mirrored)
+      How to configure TFS PR Review
       ─────────────────────────────────────────────────────────────────
       Open the repo on GitHub → Settings → Secrets and variables → Actions.
 
@@ -269,8 +257,8 @@ steps:
       Add the missing Variables (tab: Variables):
         TFS_BASE     Project base URL, URL-encoded.
                      e.g. https://tfs.example.com/tfs/Org/Project%20Name
-                     Its host MUST match the entry in `network.allowed` at the
-                     top of this workflow.
+                     Its host MUST match the entry in `network.allowed` in
+                     this workflow's shared/tfs/core.md import.
         TFS_REPO     TFS git repo name. e.g. loft-core
 
       Optional Variables:
@@ -294,15 +282,20 @@ steps:
                      or invalid = 5. Raise it gradually while watching worker
                      queue times in the Actions tab — Anthropic/TFS/runner
                      capacity may become the real ceiling before this one does.
+        TFS_USE_MIRROR
+                     Clone transport. Leave unset and the workflow uses the
+                     GitHub mirror ref tfs-mirror/<target-branch> when one
+                     exists and clones straight from TFS when it does not. Set
+                     it to true on a large repo where the mirror is the point —
+                     a missing mirror ref then warns instead of degrading
+                     silently. Set it to false to always clone from TFS.
+                     The mirror requires the companion workflows/tfs-mirror.yml
+                     (plain GHA YAML that `gh aw add` does not install: copy it
+                     into .github/workflows/ yourself).
 
       Anthropic auth is keyless via WIF — there is no ANTHROPIC_API_KEY. Set
       ANTHROPIC_FEDERATION_RULE_ID + ANTHROPIC_SERVICE_ACCOUNT_ID vars, or
       inherit the RealPage org defaults.
-
-      For fast runs on a large repo, also install the companion
-      workflows/tfs-mirror.yml (plain GHA YAML, copied into
-      .github/workflows/). Without it every run falls back to a full TFS
-      fetch: correct, but slow.
       ─────────────────────────────────────────────────────────────────
       EOF
       exit 1
@@ -330,28 +323,25 @@ steps:
       jq -n '{skip: false, mode: "coordinator"}' > "$RUNNER_TEMP/gh-aw/pull_request.json"
       echo "Coordinator run — the agent will request the dispatch job to scan TFS and fan out."
 
-  - name: Select PR, clone, compute diff
+  - name: Select the PR to review
     id: select
-    # WORKER path only — reviews exactly the PR named by pr_id. This is the
-    # original single-PR logic, byte-for-byte unchanged: reached either by a
-    # coordinator's dispatch above or by a human's manual pr_id dispatch.
+    # WORKER path only — picks exactly the PR named by pr_id. Split from the
+    # clone/diff step below because a single `run:` block carrying both is
+    # over the 21KB ceiling GitHub Actions imposes on a step's script.
+    # The two halves hand off through a file outside the agent's gh-aw
+    # directory; when nothing is eligible this step writes the skip payload
+    # and no handoff file, and the clone step no-ops.
     if: ${{ inputs.pr_id != '' }}
     env:
       # Prefers the dedicated review PAT; falls back to the shared TFS_PAT
       # only if TFS_REVIEW_PAT isn't configured (see the verify step above).
       TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
-      # GITHUB_TOKEN clones this repo's mirror refs. Bound here (not at
-      # workflow level) for parity with TFS_REVIEW_PAT scoping.
-      GITHUB_TOKEN: ${{ github.token }}
     run: |
       set -euo pipefail
       TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
       TFS_AUTH="Authorization: Basic $TFS_B64"
-      TFS_HOST="${TFS_BASE#*://}"; TFS_HOST="${TFS_HOST%%/*}"
       mkdir -p "$RUNNER_TEMP/gh-aw"
       OUT="$RUNNER_TEMP/gh-aw/pull_request.json"
-      DIFF_PATH="$RUNNER_TEMP/gh-aw/pr.diff"
-      TFS_WORK="$GITHUB_WORKSPACE/tfs-work"
 
       # Retry options for READ-ONLY TFS calls, applied to every GET in this
       # workflow. Observed in production, not theoretical: three of roughly a
@@ -549,29 +539,109 @@ steps:
         exit 0
       fi
 
+      # Hand the selection to the clone step. Deliberately NOT under
+      # $RUNNER_TEMP/gh-aw/ — that directory is the agent's, and this payload
+      # still carries raw TFS title/description/thread text. Only the
+      # sanitized projection written at the end of the clone step belongs
+      # somewhere the agent can read.
+      # `threads` is the selected PR's comment threads as fetched above. The
+      # clone step mines it for our own `agent-reviewed-sha:` markers to pick
+      # an incremental diff base, so it has to cross the step boundary with
+      # everything else — a re-GET there would cost a call and could observe a
+      # different set of threads than the eligibility scan just decided on.
+      jq -n --argjson pr "$SELECTED" \
+        --arg src_sha "$SEL_SRC_SHA" \
+        --arg trigger "$SEL_TRIGGER" \
+        --arg cmd_thread "$SEL_CMD_THREAD" \
+        --arg cmd_text "${SEL_CMD_TEXT:-}" \
+        --argjson threads "$THREADS" \
+        '{pr: $pr, src_sha: $src_sha, trigger: $trigger, cmd_thread: $cmd_thread,
+          cmd_text: $cmd_text, threads: $threads}' \
+        > "$RUNNER_TEMP/tfs-review-select.json"
+
+  - name: Clone the PR and compute its diff
+    id: prepare
+    # Second half of the worker path. Reads the selection written above and
+    # leaves a credential-free workspace plus pull_request.json for the agent.
+    if: ${{ inputs.pr_id != '' }}
+    env:
+      # Prefers the dedicated review PAT; falls back to the shared TFS_PAT
+      # only if TFS_REVIEW_PAT isn't configured (see the verify step above).
+      TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
+      # GITHUB_TOKEN clones this repo's mirror refs. Bound here (not at
+      # workflow level) for parity with TFS_REVIEW_PAT scoping.
+      GITHUB_TOKEN: ${{ github.token }}
+    run: |
+      set -euo pipefail
+      HANDOFF="$RUNNER_TEMP/tfs-review-select.json"
+      if [ ! -f "$HANDOFF" ]; then
+        echo "No PR was selected; nothing to clone."
+        exit 0
+      fi
+      TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
+      TFS_AUTH="Authorization: Basic $TFS_B64"
+      TFS_HOST="${TFS_BASE#*://}"; TFS_HOST="${TFS_HOST%%/*}"
+      OUT="$RUNNER_TEMP/gh-aw/pull_request.json"
+      DIFF_PATH="$RUNNER_TEMP/gh-aw/pr.diff"
+      TFS_WORK="$GITHUB_WORKSPACE/tfs-work"
+
+      # Fail loudly on an incomplete handoff. Every value below is read further
+      # down inside a `$(... || true)` or a `jq` filter that tolerates an empty
+      # input, so a key the select step forgot to write would otherwise leave
+      # this step green while silently changing what gets reviewed.
+      for k in pr src_sha trigger cmd_thread cmd_text threads; do
+        jq -e --arg k "$k" 'has($k)' "$HANDOFF" > /dev/null || {
+          echo "ERROR: handoff $HANDOFF is missing '$k'." >&2
+          echo "The select step and this step have drifted; they must agree on the payload." >&2
+          exit 1
+        }
+      done
+
+      SELECTED=$(jq -c '.pr' "$HANDOFF")
+      SEL_SRC_SHA=$(jq -r '.src_sha' "$HANDOFF")
+      THREADS=$(jq -c '.threads' "$HANDOFF")
+      SEL_TRIGGER=$(jq -r '.trigger' "$HANDOFF")
+      SEL_CMD_THREAD=$(jq -r '.cmd_thread' "$HANDOFF")
+      SEL_CMD_TEXT=$(jq -r '.cmd_text' "$HANDOFF")
+
       PR_ID=$(echo "$SELECTED" | jq -r '.pullRequestId')
       SRC_REF=$(echo "$SELECTED" | jq -r '.sourceRefName')
       TGT_REF=$(echo "$SELECTED" | jq -r '.targetRefName')
       TGT_BRANCH="${TGT_REF#refs/heads/}"
       echo "Selected PR $PR_ID: $SRC_REF -> $TGT_REF at ${SEL_SRC_SHA:0:8}"
 
-      # ---------- 4. GitHub mirror clone (cheap) + incremental TFS fetch ----------
-      # Start from the GitHub mirror of the PR's TARGET branch that
-      # .github/workflows/tfs-mirror.yml maintains at refs/heads/tfs-mirror/<b>,
-      # then fetch only the delta (source + target refs) from TFS. The mirror
-      # is transport only — the diff below is computed from the fresh TFS
-      # commits, never the mirror ref.
-      GH_REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
-      MIRROR_BRANCH="tfs-mirror/${TGT_BRANCH}"
-      GH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
-      GH_AUTH="Authorization: Basic $GH_B64"
+      # ---------- 4. Clone the PR's target branch ----------
+      # Transport is selected by TFS_USE_MIRROR — see the comment on that
+      # variable in shared/tfs/core.md for the accepted values. With a mirror
+      # we clone refs/heads/tfs-mirror/<target> from GitHub and fetch only the
+      # delta from TFS; without one we fetch both refs straight from TFS. The
+      # mirror is transport only — the diff below is computed from the fresh
+      # TFS commits, never the mirror ref.
+      MIRROR_MODE=auto
+      case "$(printf '%s' "${TFS_USE_MIRROR:-}" | tr '[:upper:]' '[:lower:]')" in
+        "")              MIRROR_MODE=auto ;;
+        true|1|yes|on)   MIRROR_MODE=on ;;
+        false|0|no|off)  MIRROR_MODE=off ;;
+        *) echo "::warning title=Unrecognized TFS_USE_MIRROR::'${TFS_USE_MIRROR}' is not one of true/false — treating it as unset (probe for the mirror)." ;;
+      esac
 
-      if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-             ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
-        git -c "http.https://github.com/.extraheader=$GH_AUTH" \
-            clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$TFS_WORK"
-      else
-        echo "::warning title=TFS mirror missing::refs/heads/$MIRROR_BRANCH not present on GitHub — falling back to full TFS fetch. Install/dispatch the 'TFS Mirror Sync' workflow (tfs-mirror.yml) to make runs fast."
+      MIRROR_PRESENT=false
+      if [ "$MIRROR_MODE" != "off" ]; then
+        GH_REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+        MIRROR_BRANCH="tfs-mirror/${TGT_BRANCH}"
+        GH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+        GH_AUTH="Authorization: Basic $GH_B64"
+        if git -c "http.https://github.com/.extraheader=$GH_AUTH" \
+               ls-remote --exit-code --heads "$GH_REPO_URL" "$MIRROR_BRANCH" > /dev/null; then
+          MIRROR_PRESENT=true
+          git -c "http.https://github.com/.extraheader=$GH_AUTH" \
+              clone --branch "$MIRROR_BRANCH" --single-branch "$GH_REPO_URL" "$TFS_WORK"
+        elif [ "$MIRROR_MODE" = "on" ]; then
+          echo "::warning title=TFS mirror missing::refs/heads/$MIRROR_BRANCH not present on GitHub, but TFS_USE_MIRROR asks for it — falling back to a direct TFS fetch. Install/dispatch the 'TFS Mirror Sync' workflow (tfs-mirror.yml), or set TFS_USE_MIRROR=false to silence this."
+        fi
+      fi
+
+      if [ "$MIRROR_PRESENT" = "false" ]; then
         git init "$TFS_WORK"
       fi
       git -C "$TFS_WORK" config user.email "agent-bot@noreply.local"
@@ -735,443 +805,10 @@ tools:
 # `noop`, `missing-tool`, `missing-data`, `report_incomplete`, and
 # `create_issue` (for incomplete-run reporting) are auto-injected by gh-aw with
 # safe defaults; do not redeclare them here.
-safe-outputs:
-  jobs:
-    tfs-post-pr-review:
-      description: |
-        Post the AI code review onto the TFS pull request as comment thread(s):
-        one summary thread (carrying the reviewed-SHA marker) plus up to 8
-        inline threads anchored to specific lines. Call exactly once per run,
-        after you have finished analyzing the diff. This is advisory only — it
-        posts comments, it never votes on or completes the PR.
-      inputs:
-        pr_id:
-          type: number
-          required: true
-          description: "TFS pull request ID being reviewed (from the workspace JSON)."
-        source_commit_sha:
-          type: string
-          required: true
-          description: "The PR's source_commit_sha from the workspace JSON (40-char hex). Recorded in the summary comment as the idempotency marker and a human-readable 'reviewed at commit' line. Do NOT invent or alter it."
-        summary_markdown:
-          type: string
-          required: true
-          description: "The summary review body (markdown): verdict, per-dimension score table, and prioritized findings. Posted as one PR-level comment thread."
-        inline_findings_json:
-          type: string
-          required: true
-          description: "A JSON array (as a string) of up to 8 inline findings, each an object {\"path\": \"/repo/relative/path\", \"line\": <int>, \"severity\": \"high|medium|low\", \"summary\": \"<one paragraph>\"}. `path` is repo-relative with a leading slash; `line` is a line in the new (post-change) file. Pass \"[]\" if there are no inline findings. Inline posting is best-effort; every finding also appears in summary_markdown."
-        command_thread_id:
-          type: string
-          required: false
-          description: "The command_thread_id from the workspace JSON, passed through unchanged. Non-empty only when this run was triggered by a /review-ai comment; the handler then tags the review served for that command and replies on the command thread. Leave empty (or omit) for scheduled reviews."
-      runs-on: ubuntu-latest
-      # This handler's own TFS writes go via TFS_REVIEW_PAT, never
-      # GITHUB_TOKEN — but gh-aw's injected agent-artifact download step
-      # (which fetches $GH_AW_AGENT_OUTPUT) still runs in this job and needs
-      # read scope, so `contents: read` is kept rather than `permissions: {}`
-      # (matching tfs-implement.md's handler, which keeps it for the same
-      # reason).
-      permissions:
-        contents: read
-      env:
-        # Same TFS_REVIEW_PAT-preferred, TFS_PAT-fallback precedence as the
-        # select step — both must resolve to the same identity for a given
-        # run, which `||` guarantees since it's evaluated the same way here.
-        TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
-        TFS_BASE: ${{ vars.TFS_BASE }}
-        TFS_REPO: ${{ vars.TFS_REPO }}
-      steps:
-        # gh-aw v0.76.x emits `if: (!cancelled()) && ...` on custom safe-output
-        # jobs, which overrides GitHub Actions' default needs-success gating.
-        # Guard explicitly so a failed threat-detection blocks the TFS write.
-        # Delete when upstream lands native gating on custom safe-output jobs.
-        - name: Gate on threat-detection success
-          if: needs.detection.result != 'success'
-          env:
-            DETECTION_RESULT: ${{ needs.detection.result }}
-          run: |
-            echo "ERROR: threat-detection did not succeed (result=${DETECTION_RESULT})." >&2
-            echo "Refusing to write to TFS." >&2
-            exit 1
-        - name: Post review thread(s) to the TFS PR
-          run: |
-            set -euo pipefail
-            TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
-            TFS_AUTH="Authorization: Basic $TFS_B64"
-
-            # Enforce "exactly one" — gh-aw's safe-outputs.jobs.* schema does
-            # not accept `max: 1`, so count here.
-            COUNT=$(jq -c '[.items[] | select(.type == "tfs_post_pr_review")] | length' "$GH_AW_AGENT_OUTPUT")
-            if [ "$COUNT" -eq 0 ]; then echo "No tfs_post_pr_review intent emitted; nothing to do."; exit 0; fi
-            if [ "$COUNT" -gt 1 ]; then echo "ERROR: expected exactly 1 tfs_post_pr_review intent, got $COUNT." >&2; exit 1; fi
-            INTENT=$(jq -c '.items[] | select(.type == "tfs_post_pr_review")' "$GH_AW_AGENT_OUTPUT")
-
-            PR_ID=$(echo "$INTENT" | jq -r '.pr_id // empty')
-            SRC_SHA=$(echo "$INTENT" | jq -r '.source_commit_sha // empty')
-            SUMMARY=$(echo "$INTENT" | jq -r '.summary_markdown // empty')
-            INLINE=$(echo "$INTENT" | jq -c '.inline_findings_json // "[]" | fromjson? // []')
-            CMD_THREAD=$(echo "$INTENT" | jq -r '.command_thread_id // empty')
-
-            # Idempotency and /review-ai dedup key off the marker patterns
-            # below found in *existing* comment content. Strip any
-            # look-alike text the agent itself put in summary_markdown so
-            # prompt-injected output cannot spoof a marker for an arbitrary
-            # SHA/thread and suppress a future review. The handler-generated
-            # FOOTER below is the only place these markers are allowed to
-            # come from.
-            SUMMARY=$(printf '%s' "$SUMMARY" | sed -E \
-              -e 's/<!--[[:space:]]*agent-(reviewed-sha|review-command)[[:space:]]*:[^>]*-->//g' \
-              -e 's/agent-(reviewed-sha|review-command)[[:space:]]*:[^[:space:]]*//g')
-
-            # Defensive validation of agent-supplied fields.
-            for pair in "PR_ID=$PR_ID" "SRC_SHA=$SRC_SHA" "SUMMARY=$SUMMARY"; do
-              name="${pair%%=*}"; val="${pair#*=}"
-              [ -n "$val" ] || { echo "ERROR: missing required field $name." >&2; exit 1; }
-            done
-            case "$PR_ID" in *[!0-9]*) echo "ERROR: pr_id '$PR_ID' is not numeric." >&2; exit 1;; esac
-            if ! printf '%s' "$SRC_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
-              echo "ERROR: source_commit_sha '$SRC_SHA' is not a 40-char hex SHA." >&2; exit 1
-            fi
-            case "$CMD_THREAD" in *[!0-9]*) CMD_THREAD="";; esac  # ignore anything non-numeric
-
-            # Read-only retry options — same rationale as the select step's
-            # CURL_READ (see there). Applied ONLY to the two GETs below. The
-            # thread-creating POSTs further down stay deliberately un-retried:
-            # one that times out after TFS already accepted it would post the
-            # review twice.
-            CURL_READ=(--connect-timeout 20 --retry 3 --retry-delay 5 --retry-all-errors)
-
-            REPO_ID=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
-              "$TFS_BASE/_apis/git/repositories/$TFS_REPO?api-version=6.0" | jq -r '.id')
-            THREADS_URL="$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0"
-
-            # Idempotency re-check at write time (guards overlapping runs racing
-            # the same PR before either posted). A command-triggered review is
-            # deduped by its command thread id; a scheduled one by the SHA.
-            SHA_MARKER="agent-reviewed-sha: $SRC_SHA"
-            EXISTING=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" "$THREADS_URL")
-            if [ -n "$CMD_THREAD" ]; then
-              CMD_MARKER="agent-review-command: $CMD_THREAD"
-              if echo "$EXISTING" | jq -e --arg m "$CMD_MARKER" \
-                   '[.value[]?.comments[]?.content // ""] | any(contains($m))' > /dev/null; then
-                echo "PR $PR_ID: /review-ai command (thread $CMD_THREAD) already served — skipping duplicate post."
-                exit 0
-              fi
-            else
-              if echo "$EXISTING" | jq -e --arg m "$SHA_MARKER" \
-                   '[.value[]?.comments[]?.content // ""] | any(contains($m))' > /dev/null; then
-                echo "PR $PR_ID already has a review for ${SRC_SHA:0:8} — skipping duplicate post."
-                exit 0
-              fi
-            fi
-
-            # ---------- Post the summary thread (carries the marker[s]) ----------
-            # The SHA marker is always present (machine dedup key + human "reviewed
-            # at commit" context). A command-triggered review also carries the
-            # command marker so that /review-ai request is not served twice.
-            if [ -n "$CMD_THREAD" ]; then
-              TRIGGER_NOTE="Requested via \`/review-ai\`. "
-              CMD_MARKER_LINE=$(printf '\n<!-- agent-review-command: %s -->' "$CMD_THREAD")
-            else
-              TRIGGER_NOTE=""
-              CMD_MARKER_LINE=""
-            fi
-            FOOTER=$(printf '\n\n---\n_🤖 Automated review by `tfs-review-pr-mirrored`. %sReviewed at source commit `%s`. This is a second set of eyes, not a gate — a human review is still required. To opt out of scheduled reviews, label the PR `skip-ai-review`; comment `/review-ai` for an on-demand re-review._\n<!-- %s -->%s' "$TRIGGER_NOTE" "${SRC_SHA:0:8}" "$SHA_MARKER" "$CMD_MARKER_LINE")
-            BODY="${SUMMARY}${FOOTER}"
-            THREAD=$(jq -n --arg body "$BODY" \
-              '{comments:[{parentCommentId:0, content:$body, commentType:1}], status:1}')
-            HTTP=$(curl -sS -o /tmp/thread.json -w "%{http_code}" \
-              -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
-              --data "$THREAD" "$THREADS_URL")
-            if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ]; then
-              echo "ERROR: summary thread POST returned HTTP $HTTP" >&2; cat /tmp/thread.json >&2; exit 1
-            fi
-            echo "Posted summary review thread on PR $PR_ID."
-
-            # If a /review-ai command triggered this run, reply on that command
-            # thread so the requester is notified. Best-effort — a failure here
-            # does not undo the review that was already posted above.
-            if [ -n "$CMD_THREAD" ]; then
-              REPLY=$(jq -n '{content: "✅ AI review posted — see the summary thread on this PR.", parentCommentId: 1, commentType: 1}')
-              RHTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
-                -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
-                --data "$REPLY" \
-                "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads/$CMD_THREAD/comments?api-version=6.0")
-              if [ "$RHTTP" = "200" ] || [ "$RHTTP" = "201" ]; then
-                echo "Replied on /review-ai command thread $CMD_THREAD."
-              else
-                echo "::warning title=Command reply failed::Could not reply on /review-ai thread $CMD_THREAD (HTTP $RHTTP). The review itself was posted."
-              fi
-            fi
-
-            # ---------- Post inline threads (best-effort) ----------
-            # TFS anchors a thread to a line via threadContext (filePath +
-            # rightFileStart/End). A malformed line/path yields an HTTP 4xx we
-            # surface as a warning rather than failing the whole review — the
-            # finding is already in the summary above.
-            N=$(echo "$INLINE" | jq 'length')
-            echo "Inline findings: $N"
-            if [ "$N" -gt 8 ]; then
-              echo "::warning title=Too many inline findings::Agent emitted $N inline findings; contract caps at 8. Posting only the first 8 — all findings remain in the summary review."
-              N=8
-            fi
-            j=0
-            while [ "$j" -lt "$N" ]; do
-              F=$(echo "$INLINE" | jq -c ".[$j]")
-              j=$((j + 1))
-              FPATH=$(echo "$F" | jq -r '.path // empty')
-              LINE=$(echo "$F" | jq -r '.line // empty')
-              SEV=$(echo "$F" | jq -r '.severity // "low"')
-              FSUM=$(echo "$F" | jq -r '.summary // empty')
-              [ -n "$FPATH" ] && [ -n "$FSUM" ] || { echo "  finding $j: missing path/summary — skip."; continue; }
-              case "$LINE" in ''|*[!0-9]*) echo "  finding $j: non-numeric line — skip."; continue;; esac
-              case "$FPATH" in /*) ;; *) FPATH="/$FPATH";; esac
-              CBODY="[$SEV] $FSUM"
-              ITHREAD=$(jq -n --arg body "$CBODY" --arg path "$FPATH" --argjson line "$LINE" \
-                '{comments:[{parentCommentId:0, content:$body, commentType:1}], status:1,
-                  threadContext:{filePath:$path,
-                    rightFileStart:{line:$line, offset:1},
-                    rightFileEnd:{line:$line, offset:1}}}')
-              IHTTP=$(curl -sS -o /tmp/ithread.json -w "%{http_code}" \
-                -X POST -H "$TFS_AUTH" -H "Content-Type: application/json" \
-                --data "$ITHREAD" "$THREADS_URL")
-              if [ "$IHTTP" = "200" ] || [ "$IHTTP" = "201" ]; then
-                echo "  posted inline thread on ${FPATH}:${LINE}"
-              else
-                echo "::warning title=Inline comment failed::Could not post inline thread on ${FPATH}:${LINE} (HTTP $IHTTP). The finding is included in the summary review."
-              fi
-            done
-            echo "Review posting complete for PR $PR_ID."
-
-    tfs-dispatch-worker-reviews:
-      description: |
-        COORDINATOR path only. Scan TFS for up to TFS_REVIEW_BATCH_SIZE
-        distinct eligible PRs (same rules as a worker's own schedule-path
-        scan: /review-ai commands first, then non-draft/non-skip-labeled/
-        not-yet-reviewed PRs, oldest first) and dispatch each as its own
-        isolated workflow_dispatch worker run. Call exactly once per
-        coordinator run — this job does its own TFS scan rather than
-        trusting a list from the agent, since the scan is fully
-        deterministic and doesn't benefit from being round-tripped through
-        the model; `acknowledged` exists only because a safe-output needs at
-        least one field, not because its value matters.
-      inputs:
-        acknowledged:
-          type: boolean
-          required: true
-          description: "Always pass true. This job ignores the value — it performs its own TFS scan rather than trusting anything from the agent — but the tool call needs at least one declared field."
-      # Deterministic coordinator-only gate — gh-aw already restricts this job
-      # to runs where the agent emitted a matching tfs_dispatch_worker_reviews
-      # intent, but that alone trusts the model's self-reported mode. A
-      # worker run (inputs.pr_id set) could still emit that same intent if
-      # mis-prompted or compromised, which would fire an unwanted scan+dispatch
-      # from a worker context. inputs.pr_id is set by the trigger itself, not
-      # the agent, so this can't be spoofed by anything the model emits.
-      # Written WITHOUT ${{ }} deliberately: gh-aw ANDs this onto its own
-      # bare-expression base gate ((!cancelled()) && ... && contains(...)) —
-      # wrapping this in ${{ }} would mix bare and wrapped expression syntax
-      # in the same if:, which GitHub Actions rejects.
-      if: inputs.pr_id == ''
-      runs-on: ubuntu-latest
-      # actions: write is what lets this job dispatch worker runs — safe here
-      # specifically because this is NOT the agent job (see the permissions
-      # block's comment). contents: read is kept for the same reason as
-      # tfs-post-pr-review's handler: gh-aw's injected agent-artifact
-      # download step still runs in this job.
-      permissions:
-        contents: read
-        actions: write
-      env:
-        TFS_REVIEW_PAT: ${{ secrets.TFS_REVIEW_PAT || secrets.TFS_PAT }}
-        TFS_BASE: ${{ vars.TFS_BASE }}
-        TFS_REPO: ${{ vars.TFS_REPO }}
-        TFS_REVIEW_SCHEDULE_ENABLED: ${{ vars.TFS_REVIEW_SCHEDULE_ENABLED }}
-        TFS_REVIEW_MAX_AGE_DAYS: ${{ vars.TFS_REVIEW_MAX_AGE_DAYS }}
-        # OPTIONAL fan-out width (positive integer), read only here — this is
-        # the job that actually scans and dispatches. Instead of reviewing the
-        # first eligible match itself, a coordinator run dispatches up to this
-        # many eligible PRs as separate, isolated workflow_dispatch WORKER runs
-        # (each with pr_id set), so multiple PRs get reviewed from one tick
-        # instead of one. Unset or invalid = 5. Start modest and raise it while
-        # watching worker queue times — a large batch concentrates dispatch
-        # demand instantly, and Anthropic/TFS/runner capacity may bite before
-        # the batch size does.
-        TFS_REVIEW_BATCH_SIZE: ${{ vars.TFS_REVIEW_BATCH_SIZE }}
-        # workflow_dispatch is an explicit, documented exception to
-        # GITHUB_TOKEN's no-recursive-triggers rule (see
-        # https://github.blog/changelog/2022-09-08-github-actions-use-github_token-with-workflow_dispatch-and-repository_dispatch/),
-        # so this reliably creates new runs rather than silently no-opping.
-        GH_TOKEN: ${{ github.token }}
-      steps:
-        # Same rationale as tfs-post-pr-review's identical gate — see there.
-        - name: Gate on threat-detection success
-          if: needs.detection.result != 'success'
-          env:
-            DETECTION_RESULT: ${{ needs.detection.result }}
-          run: |
-            echo "ERROR: threat-detection did not succeed (result=${DETECTION_RESULT})." >&2
-            echo "Refusing to scan/dispatch." >&2
-            exit 1
-        - name: Scan TFS and dispatch worker runs
-          run: |
-            set -euo pipefail
-            COUNT_INTENT=$(jq -c '[.items[] | select(.type == "tfs_dispatch_worker_reviews")] | length' "$GH_AW_AGENT_OUTPUT")
-            if [ "$COUNT_INTENT" -eq 0 ]; then echo "No tfs_dispatch_worker_reviews intent emitted; nothing to do."; exit 0; fi
-            if [ "$COUNT_INTENT" -gt 1 ]; then echo "ERROR: expected exactly 1 tfs_dispatch_worker_reviews intent, got $COUNT_INTENT." >&2; exit 1; fi
-
-            TFS_B64="$(printf ':%s' "$TFS_REVIEW_PAT" | base64 -w0)"
-            TFS_AUTH="Authorization: Basic $TFS_B64"
-
-            # Read-only retry options — same rationale as the select step's
-            # CURL_READ (see there). This job is where the observed
-            # `curl: (28)` coordinator failures actually happened: every call
-            # it makes to TFS is a GET, so all of them are retried, and this
-            # job posts nothing to TFS at all.
-            CURL_READ=(--connect-timeout 20 --retry 3 --retry-delay 5 --retry-all-errors)
-
-            # ---------- 1. Resolve repo id ----------
-            REPO_ID=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
-              "$TFS_BASE/_apis/git/repositories/$TFS_REPO?api-version=6.0" | jq -r '.id')
-            if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
-              echo "::error::Could not resolve TFS repo id for '$TFS_REPO'." >&2; exit 1
-            fi
-
-            # ---------- 2. Build the candidate PR list (oldest first) ----------
-            # Same scan a worker's own schedule path uses — see that step's
-            # comment for why $top=100 and oldest-first draining are the
-            # intended scope controls.
-            CANDIDATES=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" -G \
-              --data-urlencode "searchCriteria.status=active" \
-              --data-urlencode "\$top=100" \
-              "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullrequests?api-version=6.0" \
-              | jq -c '[.value[]] | sort_by(.creationDate)')
-            COUNT=$(echo "$CANDIDATES" | jq 'length')
-            echo "Active PR candidates: $COUNT"
-
-            # ---------- 3. Fan-out width ----------
-            BATCH_SIZE=5
-            if [ -n "${TFS_REVIEW_BATCH_SIZE:-}" ]; then
-              case "$TFS_REVIEW_BATCH_SIZE" in
-                ''|*[!0-9]*|0) echo "::warning::TFS_REVIEW_BATCH_SIZE='${TFS_REVIEW_BATCH_SIZE}' is not a positive integer — using default of $BATCH_SIZE." ;;
-                *) BATCH_SIZE="$TFS_REVIEW_BATCH_SIZE" ;;
-              esac
-            fi
-            echo "Fan-out width: up to $BATCH_SIZE worker run(s) this tick."
-
-            # ---------- 4. Collect up to BATCH_SIZE distinct eligible PRs ----------
-            # Identical eligibility rules to a worker's own schedule-path scan
-            # (COMMAND path first, then SCHEDULE path with its two admin
-            # knobs) — the only difference is COLLECTING matches instead of
-            # stopping at the first one. Kept as a literal copy (not a shared
-            # function) so the two scans can't silently drift apart without
-            # the duplication catching a reviewer's eye; if you change one,
-            # change the other.
-            SCHEDULE_ENABLED="true"
-            case "$(printf '%s' "${TFS_REVIEW_SCHEDULE_ENABLED:-}" | tr '[:upper:]' '[:lower:]')" in
-              false|0|no|off) SCHEDULE_ENABLED="false" ;;
-            esac
-            CUTOFF=""
-            if [ -n "${TFS_REVIEW_MAX_AGE_DAYS:-}" ]; then
-              case "$TFS_REVIEW_MAX_AGE_DAYS" in
-                ''|*[!0-9]*) echo "::warning::TFS_REVIEW_MAX_AGE_DAYS='${TFS_REVIEW_MAX_AGE_DAYS}' is not a positive integer — ignoring (no age filter)." ;;
-                *) CUTOFF=$(date -u -d "${TFS_REVIEW_MAX_AGE_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
-                   echo "Schedule age filter: only PRs created on/after $CUTOFF (last ${TFS_REVIEW_MAX_AGE_DAYS}d)." ;;
-              esac
-            fi
-            [ "$SCHEDULE_ENABLED" = "true" ] || echo "Scheduled scan DISABLED (TFS_REVIEW_SCHEDULE_ENABLED=false); only /review-ai PRs are collected this tick."
-
-            TO_DISPATCH=()
-            i=0
-            while [ "$i" -lt "$COUNT" ] && [ "${#TO_DISPATCH[@]}" -lt "$BATCH_SIZE" ]; do
-              PR=$(echo "$CANDIDATES" | jq -c ".[$i]")
-              i=$((i + 1))
-              PR_ID=$(echo "$PR" | jq -r '.pullRequestId')
-              IS_DRAFT=$(echo "$PR" | jq -r '.isDraft // false')
-              SRC_SHA=$(echo "$PR" | jq -r '.lastMergeSourceCommit.commitId // ""')
-              HAS_SKIP_LABEL=$(echo "$PR" | jq -r '[.labels[]?.name // empty] | any(. == "skip-ai-review")')
-
-              THREADS=$(curl -fsS "${CURL_READ[@]}" -H "$TFS_AUTH" \
-                "$TFS_BASE/_apis/git/repositories/$REPO_ID/pullRequests/$PR_ID/threads?api-version=6.0")
-
-              # COMMAND path — identical matching/dedup rules to a worker run.
-              SERVED_CMDS=$(echo "$THREADS" | jq -r '[.value[]?.comments[]?.content // ""] | join("\n")' \
-                | grep -oE 'agent-review-command: [0-9]+' | grep -oE '[0-9]+$' | sort -u || true)
-              CMD_IDS=$(echo "$THREADS" | jq -r '.value[]?
-                | select((.comments[0].content // "")
-                    | test("(^|[^a-zA-Z0-9/])/review-ai([^a-zA-Z0-9]|$)"; "i"))
-                | select([.comments[]?.content // ""] | join("\n")
-                    | test("agent-reviewed-sha:|agent-review-command:") | not)
-                | .id')
-              CMD_THREAD=""
-              for cid in $CMD_IDS; do
-                if ! echo "$SERVED_CMDS" | grep -qx "$cid"; then CMD_THREAD="$cid"; break; fi
-              done
-              if [ -n "$CMD_THREAD" ]; then
-                if [ -z "$SRC_SHA" ]; then
-                  echo "PR $PR_ID: /review-ai requested but no lastMergeSourceCommit yet — skip this tick."; continue
-                fi
-                echo "PR $PR_ID: /review-ai command (thread $CMD_THREAD) — queuing for dispatch (bypasses draft/label/dedup)."
-                TO_DISPATCH+=("$PR_ID")
-                continue
-              fi
-
-              # SCHEDULE path.
-              if [ "$SCHEDULE_ENABLED" != "true" ]; then
-                echo "PR $PR_ID: scheduled scan disabled — skip (comment /review-ai to force a review)."; continue
-              fi
-              if [ -n "$CUTOFF" ]; then
-                PR_CREATED=$(echo "$PR" | jq -r '.creationDate // ""')
-                if [ "$(echo "$PR" | jq -r --arg c "$CUTOFF" '((.creationDate // "") | sub("\\.[0-9]+Z$"; "Z")) < $c')" = "true" ]; then
-                  echo "PR $PR_ID: created $PR_CREATED is older than the ${TFS_REVIEW_MAX_AGE_DAYS}d cutoff — skip (comment /review-ai to force)."; continue
-                fi
-              fi
-              [ "$IS_DRAFT" = "true" ] && { echo "PR $PR_ID: draft (no /review-ai) — skip."; continue; }
-              [ "$HAS_SKIP_LABEL" = "true" ] && { echo "PR $PR_ID: labeled skip-ai-review — skip."; continue; }
-              if [ -z "$SRC_SHA" ]; then
-                echo "PR $PR_ID: no lastMergeSourceCommit yet (merge not computed) — skip this tick."; continue
-              fi
-              if echo "$THREADS" | jq -e --arg m "agent-reviewed-sha: $SRC_SHA" \
-                   '[.value[]?.comments[]?.content // ""] | any(contains($m))' > /dev/null; then
-                echo "PR $PR_ID: already reviewed at source commit ${SRC_SHA:0:8} — skip."
-                continue
-              fi
-
-              echo "PR $PR_ID: eligible at ${SRC_SHA:0:8} — queuing for dispatch."
-              TO_DISPATCH+=("$PR_ID")
-            done
-
-            echo "Collected ${#TO_DISPATCH[@]} PR(s) to dispatch: ${TO_DISPATCH[*]:-<none>}"
-
-            # ---------- 5. Dispatch one isolated workflow_dispatch run per PR ----------
-            # Self-discover this workflow's own file path from
-            # GITHUB_WORKFLOW_REF (format:
-            # owner/repo/.github/workflows/<file>@ref, a default GitHub
-            # Actions env var) rather than hardcoding a filename, since
-            # consumers may name their compiled stub differently.
-            WORKFLOW_FILE=$(printf '%s' "$GITHUB_WORKFLOW_REF" | sed -E 's#^[^/]+/[^/]+/\.github/workflows/##; s#@.*$##')
-            DISPATCHED=0
-            # --ref pins workers to the SAME ref this coordinator run used.
-            # Without it, `gh workflow run` dispatches on the repo's default
-            # branch regardless of what triggered the coordinator — harmless
-            # for a real schedule/dispatch tick (which only ever fires off
-            # the default branch anyway), but it silently sends worker runs
-            # to the wrong branch for a manual coordinator dispatch on a
-            # non-default ref (e.g. testing this workflow itself before
-            # merge). GITHUB_REF_NAME is a default Actions env var.
-            for pr_id in ${TO_DISPATCH[@]+"${TO_DISPATCH[@]}"}; do
-              if gh workflow run "$WORKFLOW_FILE" --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f "pr_id=$pr_id"; then
-                DISPATCHED=$((DISPATCHED + 1))
-              else
-                echo "::warning title=Dispatch failed::Could not dispatch a worker run for PR $pr_id; it remains eligible and will be retried next tick."
-              fi
-            done
-            echo "Dispatched $DISPATCHED worker run(s)."
-
 timeout-minutes: 20
 ---
 
-# TFS Pull Request Reviewer (Mirrored)
+# TFS Pull Request Reviewer
 
 Each run is either a **coordinator** or a **worker** — check `mode` in the workspace descriptor first (Step 1). A coordinator run's only job is to ask the workflow to scan TFS and dispatch worker runs; it reviews nothing itself. A worker run reviews **one** Azure DevOps (TFS) pull request. The system of record is TFS — GitHub is only the workspace where you run. For a worker run, a pre-agent step has already selected an active PR from TFS, deduped it against previously-posted reviews, cloned the repo into your workspace, and computed the review diff. Your job is to analyze that diff and emit a structured safe-output asking the workflow to post your review **back onto the TFS PR** as comment threads.
 

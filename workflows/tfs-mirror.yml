@@ -1,6 +1,6 @@
 name: TFS Mirror Sync
 
-# COMPANION of the tfs-implement-mirrored agentic workflow. This is plain
+# COMPANION of the tfs-* agentic workflows. This is plain
 # GitHub Actions YAML — `gh aw add` does not distribute it, so copy this file
 # into your consumer repo's .github/workflows/ as-is (no compile step). The
 # canonical copy lives at RealPage/agentic-workflows/workflows/tfs-mirror.yml;
@@ -18,11 +18,13 @@ name: TFS Mirror Sync
 # TFS -> GitHub is the only flow, and it is a one-way force overwrite, so the
 # mirrored commit SHAs are always byte-identical to TFS and cannot diverge.
 #
-# Consumed by: tfs-implement-mirrored (both its clone sites start from
-# refs/heads/tfs-mirror/<target-branch> and fetch only the delta from TFS).
-# The implementer degrades gracefully if this workflow stalls — its TFS fetch
-# closes any gap and it emits a ::warning when the mirror lags — but each run
-# then pays a growing transfer, so keep this workflow healthy.
+# Consumed by: tfs-implement and tfs-review-pr, whose clone sites start from
+# refs/heads/tfs-mirror/<target-branch> and fetch only the delta from TFS
+# whenever that ref exists. Both degrade gracefully if this workflow stalls —
+# their TFS fetch closes any gap, and the implementer emits a ::warning when
+# the mirror lags — but each run then pays a growing transfer, so keep this
+# workflow healthy. A repo that does not install this file is not broken:
+# both workflows clone straight from TFS instead.
 #
 # RECOMMENDED: protect the mirror namespace with a repository ruleset on
 # `refs/heads/tfs-mirror/**` that blocks pushes, branch creation, and PRs for
@@ -55,7 +57,7 @@ on:
   schedule:
     # Off-the-hour minutes (3,13,23,33,43,53). GitHub Actions throttles
     # scheduled workflows that fire on common boundaries like :00, :10, :15.
-    # Staggered against tfs-implement-mirrored's 7,22,37,52 so the
+    # Staggered against tfs-implement's 7,22,37,52 so the
     # implementer usually runs a few minutes after a fresh sync.
     - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:
