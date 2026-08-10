@@ -34,6 +34,12 @@ These are end-to-end workflows that chain multiple agents together:
 | [hello-self-hosted](../workflows/hello-self-hosted.md) | Manual | Minimal self-hosted runner example — pins a runner group and proves it can reach an internal-only host. See [self-hosted runners](workflows/self-hosted-runners.md) |
 | [netcheck-self-hosted](../workflows/netcheck-self-hosted.yml) | Manual | Diagnostic for the above. Plain GitHub Actions, no agent — checks DNS, TCP, and TLS/SNI per host and names which layer broke. Copy manually; `gh aw add` does not distribute `.yml` files |
 | [test-improver](../workflows/test-improver.md) | Daily schedule / `/test-assist <instructions>` / manual | Testing-focused repo assistant — discovers build/test/coverage commands, finds high-value test gaps, implements tests as draft PRs, maintains its open PRs, tracks learnings in repo memory. Adapted from `githubnext/agentics` with Claude via WIF (no API key) |
+| [tfs-implement](../workflows/tfs-implement.md) | Every 15 min off-hour / manual with work item ID | Implements one Azure DevOps (TFS) work item per run — claims it via a tag state machine, clones the target branch, writes code on an `agent/wi-*` branch, pushes back to TFS, and opens a TFS PR with review notes. The agent never holds the TFS PAT; safe-output handler jobs mediate every write |
+| [tfs-review-pr](../workflows/tfs-review-pr.md) | Every 15 min off-hour / manual with PR ID / `/review-ai` comment | AI review of TFS pull requests. A coordinator run scans TFS and fans out up to `TFS_REVIEW_BATCH_SIZE` worker runs, each reviewing one PR and posting a summary thread plus up to 8 inline findings back onto the TFS PR. Advisory only — never votes on or blocks the PR |
+| [tfs-mirror](../workflows/tfs-mirror.yml) | Every 10 min | Optional companion to the two above. Mirrors TFS branches into GitHub under `tfs-mirror/*` so their clones fetch only a delta. Plain GitHub Actions, no agent; copy manually — `gh aw add` does not distribute `.yml` files. Only worth installing when a direct TFS clone dominates run time |
+
+Breaking changes between majors, and what a consumer has to change when it bumps,
+are recorded in [migrations](migrations.md).
 
 ## Recommended Upstream Workflows
 

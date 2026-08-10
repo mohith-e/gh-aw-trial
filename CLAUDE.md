@@ -88,6 +88,14 @@ Uses semver tags (e.g., `v0.1.0`). Consumer repos pin to a version. Bump tags af
 - Minor: new workflows or non-breaking enhancements
 - Major: breaking changes
 
+Release-please derives the bump from commit messages, so a breaking change needs
+`type(scope)!:` or a `BREAKING CHANGE:` footer — prose in the body is not enough.
+PRs land here as squash merges, and a squashed body yields only one
+`BREAKING CHANGE:` footer to the changelog no matter how many the branch carried.
+A PR removing or renaming more than one thing therefore needs its migration steps
+written into [docs/migrations.md](docs/migrations.md), which is what consumers are
+pointed at; the changelog cannot be relied on to list them all.
+
 ## Working with gh-aw
 
 When creating, updating, debugging, or compiling workflows using the `gh aw` CLI, defer to the agent defined in `.github/agents/agentic-workflows.agent.md`. It routes to the appropriate specialized prompt (create, update, debug, upgrade, etc.) and references the canonical gh-aw documentation.
