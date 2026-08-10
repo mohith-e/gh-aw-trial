@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.0.0](https://github.com/RealPage/agentic-workflows/compare/v0.7.0...v1.0.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tfs:** workflows/tfs-review-pr-mirrored.md is removed. Consumer stubs importing it must import workflows/tfs-review-pr.md instead and set the repo variable TFS_USE_MIRROR=true to keep the mirror transport. See docs/migrations.md.
+* **tfs:** workflows/tfs-implement-mirrored.md is removed. Consumer stubs importing it must import workflows/tfs-implement.md instead and set the repo variable TFS_USE_MIRROR=true to keep the mirror transport.
+
+### Features
+
+* add test-improver workflow (Claude via WIF, adapted from githubnext/agentics) ([#130](https://github.com/RealPage/agentic-workflows/issues/130)) ([c210484](https://github.com/RealPage/agentic-workflows/commit/c21048423d1165ab47ce16114de55571926ba3c5))
+* add tfs-review-pr-mirrored workflow ([c719177](https://github.com/RealPage/agentic-workflows/commit/c71917710bf3ea0d6c89b589737e33ecce1e7b1e))
+* **tfs-review-pr-mirrored:** coordinator/worker fan-out ([1f7a8f3](https://github.com/RealPage/agentic-workflows/commit/1f7a8f39d86a11cea780af718b7dc43758bb2ecf))
+* **workflows:** coordinator/worker fan-out for tfs-review-pr-mirrored ([2294210](https://github.com/RealPage/agentic-workflows/commit/22942103a63ff6465b6ccb5fa5708e115ba8b122))
+* **workflows:** raise tfs-review-pr-mirrored to a 5-min poll cadence ([b24ff17](https://github.com/RealPage/agentic-workflows/commit/b24ff171979212ff3161b9f30eb05478dc3ab93f))
+* **workflows:** self-hosted runner example + network diagnostic ([#137](https://github.com/RealPage/agentic-workflows/issues/137)) ([c5c1aee](https://github.com/RealPage/agentic-workflows/commit/c5c1aeee038eb49618f302e85b20145bf5502898))
+* **workflows:** use a dedicated TFS_REVIEW_PAT for tfs-review-pr-mirrored ([1aaab90](https://github.com/RealPage/agentic-workflows/commit/1aaab900366971b9c2162807521adc5c86872f89))
+
+
+### Bug Fixes
+
+* address Copilot review findings on tfs-review-pr-mirrored ([c75b20f](https://github.com/RealPage/agentic-workflows/commit/c75b20f1ea7918036c809e8f2449f21fb909a334))
+* **tfs-review-pr-mirrored:** gate dispatch job to coordinator runs, fix worker ref ([72820c2](https://github.com/RealPage/agentic-workflows/commit/72820c2334a9e3e024c99c3b0de0f30ae97c4bd8))
+* **tfs-review-pr-mirrored:** retry read-only TFS calls, never the writes ([bb94cd3](https://github.com/RealPage/agentic-workflows/commit/bb94cd3fe98e6614547ec507aaceb6c472d381b4))
+* **workflows:** inline WIF engine auth in tfs-review-pr-mirrored ([#123](https://github.com/RealPage/agentic-workflows/issues/123)) ([d2f69f5](https://github.com/RealPage/agentic-workflows/commit/d2f69f58bb8a493d5f38077720c1598e1bf63566))
+* **workflows:** restore shared/wif-engine.md import on gh-aw v0.83.4 ([#128](https://github.com/RealPage/agentic-workflows/issues/128)) ([2685bb1](https://github.com/RealPage/agentic-workflows/commit/2685bb19eface2b77f0d1147616be77d9027f43b))
+* **workflows:** un-scope tfs-review-pr-mirrored's concurrency group by pr_id ([45f3231](https://github.com/RealPage/agentic-workflows/commit/45f323108c1c436ab541dca73c757c6ef85e8ffe))
+
+
+### Reverts
+
+* **workflows:** revert tfs-review-pr-mirrored to 15-min cadence ([6fd3b90](https://github.com/RealPage/agentic-workflows/commit/6fd3b90e034fa405af4e7bdb3f4d2541906ea3e6))
+
+
+### Documentation
+
+* **tfs:** add consumer migration notes for the v1.0.0 renames ([#139](https://github.com/RealPage/agentic-workflows/issues/139)) ([bd41559](https://github.com/RealPage/agentic-workflows/commit/bd415595f0bb935208ef801e294e0c506cfcdea6))
+
+
+### Code Refactoring
+
+* **tfs:** shared import modules, collapse the mirrored variants, add tfs-review-pr ([#138](https://github.com/RealPage/agentic-workflows/issues/138)) ([9f26296](https://github.com/RealPage/agentic-workflows/commit/9f26296e60b4270721600fa806d86abf795f9de4))
+
 ## [0.7.0](https://github.com/RealPage/agentic-workflows/compare/v0.6.0...v0.7.0) (2026-07-22)
 
 
