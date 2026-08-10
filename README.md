@@ -176,6 +176,7 @@ The five golden workflows above are the recommended on-ramp. The full set — in
 | `fix-failing-tests` | Diagnoses a failing test, fixes code or test, opens a fix PR | CI failure on `main` or issue labeled `agent:fix-tests` |
 | `fortify-fix` | Reads a Fortify issue and opens a focused fix PR | Issue labeled `fortify-fix` |
 | `fortify-triage` | Pulls Fortify SAST findings, opens one issue per vuln | After Fortify scan or weekly |
+| `hello-self-hosted` | Minimal self-hosted runner example; proves the runner reaches an internal-only host | Manual |
 | `implement-issue` | Reads an issue, writes code + tests, opens a PR with self-review | Issue labeled `agent:implement` |
 | `mcp-selection` | Configures data sources for agents | PRD PR merged to main |
 | `pme-triage` | Fetches PMEs from Salesforce, surfaces untracked ones as issues | Every 6 hours or manual |
@@ -200,6 +201,18 @@ gh aw add-wizard RealPage/agentic-workflows/workflows/auto-remediation.md@v0.3.0
 ```
 
 > **Important:** GitHub Actions does not populate `inputs.*` on scheduled runs — `workflow_dispatch` input defaults are UI-only and have no runtime effect. This workflow uses a workflow-level `env:` block instead. After import, open `.github/workflows/auto-remediation.md` and fill in `SERVICE_NAME`, `KIBANA_BASE_URL`, `KIBANA_DATA_VIEW_ID`, and `TITLE_PREFIX` in the `env:` section at the top. Then run `gh aw compile`. Because `gh aw update` does a 3-way merge, your values will be preserved across updates.
+
+### Running on self-hosted runners
+
+Pointing a workflow at an internal runner pool is a one-line `runs-on:` change — until the runner can't reach something, and a network fault surfaces as an agent-shaped error a long way from the cause.
+
+Two examples cover it: `hello-self-hosted` is a minimal working workflow that proves the runner reaches an internal-only host, and `netcheck-self-hosted.yml` is a plain GitHub Actions diagnostic that tells you which layer broke — DNS, routing, or TLS/SNI — in about 30 seconds without running an agent.
+
+```bash
+gh aw add RealPage/agentic-workflows/workflows/hello-self-hosted.md
+```
+
+The diagnostic is plain `.yml`, which `gh aw add` does not distribute — copy it into `.github/workflows/` manually. See [self-hosted runners](docs/workflows/self-hosted-runners.md) for pool topology differences (plain VM vs. GKE/ARC) and the known failure classes.
 
 ---
 

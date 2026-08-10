@@ -31,6 +31,8 @@ These are end-to-end workflows that chain multiple agents together:
 | [fix-failing-tests](../workflows/fix-failing-tests.md) | CI failure on default branch / issue labeled `agent:fix-tests` / manual | Reads failing tests on `main`, diagnoses the root cause, fixes code or tests, opens a fix PR with self-review |
 | [agent-refactor](../workflows/agent-refactor.md) | Issue or PR labeled `agent:refactor` | Developer-directed, behavior-preserving refactor of one area per run. Modes: targeted (area named in issue body), sweep (agent picks an area), PR (refactor the PR's diff) |
 | [agent-review-pr](../workflows/agent-review-pr.md) | PR opened or reopened | Auto AI code review — analyzes the diff for correctness, security, and repo patterns; leaves up to 8 inline comments and submits one summary review with a per-dimension score |
+| [hello-self-hosted](../workflows/hello-self-hosted.md) | Manual | Minimal self-hosted runner example — pins a runner group and proves it can reach an internal-only host. See [self-hosted runners](workflows/self-hosted-runners.md) |
+| [netcheck-self-hosted](../workflows/netcheck-self-hosted.yml) | Manual | Diagnostic for the above. Plain GitHub Actions, no agent — checks DNS, TCP, and TLS/SNI per host and names which layer broke. Copy manually; `gh aw add` does not distribute `.yml` files |
 | [test-improver](../workflows/test-improver.md) | Daily schedule / `/test-assist <instructions>` / manual | Testing-focused repo assistant — discovers build/test/coverage commands, finds high-value test gaps, implements tests as draft PRs, maintains its open PRs, tracks learnings in repo memory. Adapted from `githubnext/agentics` with Claude via WIF (no API key) |
 
 ## Recommended Upstream Workflows

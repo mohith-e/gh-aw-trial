@@ -1,0 +1,180 @@
+# Standalone network reachability check — plain GitHub Actions, NOT a gh-aw
+# workflow. No AWF, no WIF, no engine, no agent.
+#
+# `gh aw add` does not distribute plain `.yml` files. Copy this into your repo's
+# .github/workflows/ manually.
+#
+# It answers one question — "can this runner reach the hosts a workflow needs?"
+# — separately from "does gh-aw work?". Keeping those apart matters: a gh-aw run
+# that dies on a network fault produces an agent-shaped error a long way from
+# the actual cause. This runs in ~30s and names the layer that broke.
+#
+# TARGET_HOSTS is the list to probe. Replace it with the hosts your workflows
+# actually reach. Anthropic and GitHub's OIDC issuer are needed by any Claude +
+# WIF workflow; artifacts.realpage.com is here as an internal-only host, and is
+# what hello-self-hosted.md checks.
+name: Net check — self-hosted runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  netcheck:
+    name: DNS and TLS reachability
+    runs-on:
+      group: enterprise-global-runners
+    timeout-minutes: 5
+    steps:
+      - name: Check DNS and TLS reachability
+        env:
+          # Display only. Change it together with runs-on.group above, or the
+          # report names a pool the job did not run on.
+          RUNNER_GROUP: enterprise-global-runners
+          TARGET_HOSTS: >-
+            api.anthropic.com
+            token.actions.githubusercontent.com
+            artifacts.realpage.com
+        run: |
+          set +e
+
+          echo "========================= RUNNER ========================="
+          echo "runner group : ${RUNNER_GROUP}"
+          echo "hostname     : $(hostname 2>/dev/null)"
+          echo "date (UTC)   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "RUNNER_ENVIRONMENT : ${RUNNER_ENVIRONMENT:-<unset>}"
+          echo
+
+          echo "===================== DNS CONFIGURATION ====================="
+          cat /etc/resolv.conf 2>/dev/null || echo "(cannot read /etc/resolv.conf)"
+          echo
+          NAMESERVERS=$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')
+          echo "detected nameservers: ${NAMESERVERS:-<none>}"
+          echo
+          # AWF discards 169.254.*, 168.63.129.16 and 100.100.100.100 from
+          # /etc/resolv.conf as "non-portable" and substitutes 8.8.8.8/8.8.4.4.
+          # On a GKE/ARC pool the discarded address is often the pod's ONLY
+          # resolver (NodeLocal DNSCache), and clusters that block egress to
+          # public DNS then leave squid unable to resolve anything — every
+          # request dies as CONNECT 503 TCP_TUNNEL:HIER_NONE, on all hosts
+          # alike, which reads like a total outage rather than a DNS fault.
+          echo "NOTE: AWF discards link-local and cloud-metadata resolvers as 'non-portable'"
+          echo "      and falls back to 8.8.8.8/8.8.4.4. If a discarded server was the only"
+          echo "      one, and 8.8.8.8 is blocked here, squid resolves nothing."
+          echo
+
+          echo "============= RESOLVER TCP/53 REACHABILITY (best-effort) ============="
+          echo "TCP only. Most DNS runs over UDP/53, so BLOCKED here does not prove"
+          echo "resolution is broken — it means this one probe couldn't confirm it's fine."
+          for ip in ${NAMESERVERS} 8.8.8.8 8.8.4.4; do
+            if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${ip}/53" 2>/dev/null; then
+              echo "  OPEN     ${ip}:53 (TCP)"
+            else
+              echo "  BLOCKED  ${ip}:53 (TCP)"
+            fi
+          done
+          echo "  (8.8.8.8 and 8.8.4.4 shown because they are AWF's fallback resolvers)"
+          echo
+
+          # A cert chain means the handshake completed. Anything else is a fail,
+          # and the first matching error line is usually enough to tell a reset
+          # from a timeout from a refusal.
+          tls_test() {
+            connect="$1"; sni="$2"
+            out=$(echo | timeout 12 openssl s_client -connect "${connect}" -servername "${sni}" 2>&1)
+            if printf '%s' "${out}" | grep -q 'Certificate chain'; then
+              # The leaf subject, not the chain listing — the chain is printed
+              # root-first, so grepping it reports the CA rather than the host.
+              cn=$(printf '%s' "${out}" | grep -m1 '^subject=' | grep -o 'CN *= *[^,]*')
+              echo "        PASS  -> ${cn:-certificate chain returned}"
+              return 0
+            fi
+            reason=$(printf '%s' "${out}" | grep -m1 -iE 'connect:|reset|refused|timed out|no route|Name or service|gethostby')
+            echo "        FAIL  -> ${reason:-no certificate chain returned}"
+            return 1
+          }
+
+          SUMMARY_ROWS=""
+          OVERALL=0
+
+          for HOST in ${TARGET_HOSTS}; do
+            echo "=================================================================="
+            echo "HOST: ${HOST}"
+            echo "=================================================================="
+
+            IP=$(getent ahostsv4 "${HOST}" 2>/dev/null | awk '{print $1}' | head -1)
+            [ -z "${IP}" ] && IP=$(getent hosts "${HOST}" 2>/dev/null | awk '{print $1}' | head -1)
+
+            if [ -z "${IP}" ]; then
+              # No IP means the IP-pinned tests cannot run at all. That is not a
+              # gap in the diagnosis — it IS the diagnosis.
+              echo "  DNS: FAILED to resolve via system resolver"
+              VERDICT="DNS — ${HOST} does not resolve. Fix name resolution before reading anything else."
+              echo "  VERDICT: ${VERDICT}"
+              SUMMARY_ROWS="${SUMMARY_ROWS}| ${HOST} | — | — | — | — | DNS |"$'\n'
+              OVERALL=1
+              echo
+              continue
+            fi
+            echo "  DNS: ${HOST} -> ${IP}"
+
+            # Separates a network-layer drop from a TLS-layer one. Without it, a
+            # server that rejects unknown SNI looks identical to an unroutable host.
+            if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${IP}/443" 2>/dev/null; then
+              echo "  TCP 443: OPEN"
+              TCP=0
+            else
+              echo "  TCP 443: BLOCKED"
+              TCP=1
+            fi
+
+            echo "  [A] hostname ${HOST}, SNI=${HOST}   (DNS + TLS)"
+            tls_test "${HOST}:443" "${HOST}"; A=$?
+            echo "  [B] IP ${IP}, SNI=${HOST}   (TLS only)"
+            tls_test "${IP}:443" "${HOST}"; B=$?
+            echo "  [C] IP ${IP}, SNI=example.com   (SNI-fronting control)"
+            tls_test "${IP}:443" "example.com"; C=$?
+
+            if [ ${B} -eq 0 ]; then
+              VERDICT="OK — TLS to ${HOST} succeeds."
+              STATE=OK
+            elif [ ${TCP} -ne 0 ]; then
+              VERDICT="UNREACHABLE — ${IP}:443 refuses TCP. Routing or egress firewall, not TLS."
+              STATE=UNREACHABLE
+            elif [ ${C} -eq 0 ]; then
+              VERDICT="SNI BLOCK — SNI=${HOST} is rejected but SNI=example.com to ${IP} succeeds. Hostname-based egress filtering."
+              STATE="SNI BLOCK"
+            else
+              VERDICT="TLS BLOCKED — TCP to ${IP}:443 opens but no handshake completes under any SNI."
+              STATE="TLS BLOCK"
+            fi
+
+            [ ${A} -ne 0 ] && [ ${B} -eq 0 ] && \
+              VERDICT="DNS — [A] failed while [B] passed. TLS is fine; resolution is the fault." && STATE=DNS
+            [ "${STATE}" != "OK" ] && OVERALL=1
+
+            echo "  VERDICT: ${VERDICT}"
+            echo
+            SUMMARY_ROWS="${SUMMARY_ROWS}| ${HOST} | ${IP} | $([ ${A} -eq 0 ] && echo PASS || echo FAIL) | $([ ${B} -eq 0 ] && echo PASS || echo FAIL) | $([ ${C} -eq 0 ] && echo PASS || echo FAIL) | ${STATE} |"$'\n'
+          done
+
+          echo "======================== HOW TO READ THIS ========================"
+          echo "  [B] passes                     -> host is fine"
+          echo "  [B] fails, [C] passes          -> SNI-based egress block"
+          echo "  [B] fails, [C] fails, TCP open -> TLS blocked, not SNI-selective"
+          echo "  TCP 443 blocked                -> routing/firewall, not TLS"
+          echo "  [A] fails, [B] passes          -> DNS is the fault"
+          echo
+          echo "  All hosts failing identically usually means DNS, not per-host blocking."
+
+          {
+            echo "### Net check — ${RUNNER_GROUP}"
+            echo
+            echo "| Host | IP | [A] host+SNI | [B] IP-pinned | [C] SNI control | Verdict |"
+            echo "|---|---|---|---|---|---|"
+            printf '%s' "${SUMMARY_ROWS}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          exit ${OVERALL}
