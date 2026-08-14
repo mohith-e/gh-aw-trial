@@ -4,12 +4,14 @@ Generic implementation agent. Label an issue `agent:implement` and it reads the 
 
 Works out of the box in any repo because it discovers the project's stack and test commands at runtime.
 
+By default, it stops after posting its Implementation Plan and waits for a human to approve it — see [Plan Approval](#plan-approval) below.
+
 ## Requirements
 
 | Requirement | Why |
 |---|---|
 | WIF auth: vars `ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_SERVICE_ACCOUNT_ID` | The workflow authenticates to Anthropic via WIF (keyless) — no `ANTHROPIC_API_KEY` secret. RealPage repos inherit the org-default pair; set repo-level vars to override per product. See [Authentication](../wif-auth.md). |
-| Labels: `agent:implement`, `agent:needs-review`, `agent:needs-clarification`, `ready-for-decomposition` | The workflow triggers on `agent:implement`, applies the `agent:*` labels for PR handoff and ambiguous issues, and applies `ready-for-decomposition` (shared with the `story-decomposition` workflow) when an issue is too large to implement in one pass. |
+| Labels: `agent:implement`, `agent:needs-review`, `agent:needs-clarification`, `ready-for-decomposition`, `agent:plan-pending-approval`, `agent:skip-plan-review` | The workflow triggers on `agent:implement`, applies the `agent:*` labels for PR handoff and ambiguous issues, applies `ready-for-decomposition` (shared with the `story-decomposition` workflow) when an issue is too large to implement in one pass, and applies/removes `agent:plan-pending-approval` around the plan-approval gate. `agent:skip-plan-review` is only ever read, never applied, by this workflow — see [Plan Approval](#plan-approval). |
 | GitHub Actions: "Allow GitHub Actions to create and approve pull requests" | Required by the `create-pull-request` safe output. Settings → Actions → General → Workflow permissions. |
 | Recommended: `CLAUDE.md` in the repo root | The agent trusts `CLAUDE.md` over inference when discovering stack, conventions, and commands. |
 
@@ -19,6 +21,8 @@ gh label create agent:implement --description "Triggers implement-issue workflow
 gh label create agent:needs-review --description "Implementation PR awaiting review" --color "fbca04"
 gh label create agent:needs-clarification --description "Issue needs more detail before implementation" --color "d93f0b"
 gh label create ready-for-decomposition --description "Issue is too large; break it into sub-issues" --color "5319e7"
+gh label create agent:plan-pending-approval --description "Implementation plan is waiting on human approval" --color "fbca04"
+gh label create agent:skip-plan-review --description "Skip the plan-approval wait; proceed immediately after posting the plan" --color "0e8a16"
 ```
 
 ## Getting Started
@@ -94,16 +98,36 @@ Steps:
 Ask me clarifying questions before writing anything if the repo's conventions aren't clear from the code, or if the dispatcher agent's update prompt asks for information you don't have.
 ```
 
+## Plan Approval
+
+By default, the workflow stops after posting its Implementation Plan comment (Step 3) and waits for a human to approve it before writing any code. Think of it as a cloud-hosted, asynchronous version of "a dev reviews the plan before the agent proceeds" — the same trust boundary a local interactive session gives you by default, just running unattended in Actions.
+
+**What happens on a normal `agent:implement` run:**
+
+1. The plan comment is posted, as before.
+2. The workflow checks the issue for `agent:skip-plan-review`:
+   - **Present** — proceeds immediately to implementation. This is the pre-v2 behavior, preserved as an explicit, human-set opt-in.
+   - **Absent (the default)** — applies `agent:plan-pending-approval`, posts a short comment explaining how to respond, and stops. No branch or PR is created in that run.
+
+**Responding to a pending plan**, via a comment on the issue:
+
+- Comment **`/approve-plan`** (as the first word) to accept the plan as posted. The label is removed and the workflow resumes implementation using that plan — it does not regenerate it.
+- Comment anything else — a question, a requested change, a redirect — and the workflow treats it as feedback: it revises the plan, posts the revised version, and stays `agent:plan-pending-approval`. There's no limit on revision rounds; keep commenting until the plan looks right, then approve it.
+
+**`agent:skip-plan-review` is only ever read by this workflow, never applied by it.** A human sets it, per issue or ahead of time via automation you build, before the issue is labeled `agent:implement` (or before the plan is posted, for a re-run). Setting it up front is the only way to get the old always-proceed behavior.
+
+**Building an auto-labeler.** Once a team has run enough `agent:implement` issues through manual approval to trust a *class* of work, the natural next step is a separate workflow that applies `agent:skip-plan-review` automatically based on mechanical, low-risk signals — bounded blast radius or file count, explicit acceptance criteria present, no open questions in the thread, no CODEOWNERS-flagged paths touched, and so on. Model it on a label-gated eligibility check with cited evidence and explicit exclusion rules, not a holistic judgment call — the same shape as this workflow's own scope check, just running as a pre-check before `agent:implement` is applied rather than inside this workflow. That detector is out of scope here; this workflow only defines the gate it reads.
+
 ## Outputs
 
-Every run of the workflow produces:
+Every run of the workflow produces one of these, depending on the trigger and the plan-approval gate:
 
-- **Implementation plan** posted as a comment on the issue before any code is written
-- **A branch** named `agent/implement-issue-<issue_number>`
-- **A pull request** with sections for Summary, What Changed, Test Coverage, Risks, Assumptions, and Out of Scope
-- **A self-review** posted as a separate PR comment with "things I'm confident about" and "things reviewers should double-check"
-- **`agent:needs-review`** label on the PR
+- **Plan pending approval (the default path):** Implementation plan comment → `agent:plan-pending-approval` label → approval-request comment. No branch or PR yet.
+- **Approved (`/approve-plan` comment, or `agent:skip-plan-review` was already present):** **A branch** named `agent/implement-issue-<issue_number>` → **a pull request** with sections for Summary, What Changed, Test Coverage, Risks, Assumptions, and Out of Scope → **a self-review** posted as a separate PR comment with "things I'm confident about" and "things reviewers should double-check" → **`agent:needs-review`** label on the PR.
+- **Feedback comment while pending approval:** A revised plan comment, replacing the previous plan. `agent:plan-pending-approval` stays applied.
 
 If the issue is unclear, the workflow posts a clarification comment and applies `agent:needs-clarification` instead of guessing.
 
 If tests fail three times, the workflow opens a **draft** PR with failure details so a human can take over.
+
+**Why the self-review is a comment, not a first-class PR review.** It would be, if `submit-pull-request-review` could target the PR the run just created — that's what it used to do, and it's the better outcome when it works. But this workflow's triggers are `issues:labeled` and `workflow_dispatch`, never `pull_request`, so `submit-pull-request-review`'s default `target: "triggering"` has nothing to resolve. The documented workaround — `target: "*"` plus the `temporary_id` from `create-pull-request` — doesn't help either: as of gh-aw v0.83.4, `submit_pr_review.cjs` never calls the temporary-ID resolver that sibling handlers (`merge_pull_request.cjs`, `close_discussion.cjs`, `update_discussion.cjs`) do use, so it can't resolve a same-run PR at all (confirmed via job logs; this is a gap in gh-aw itself, not a workflow config issue — not yet reported upstream). `add-comment`'s handler resolves temporary IDs correctly, so that's what Step 7 uses instead. Revisit this once gh-aw closes that gap.

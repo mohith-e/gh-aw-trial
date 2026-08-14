@@ -8,6 +8,58 @@ Consumers install workflows with `gh aw add`, which copies the workflow and its
 command for the new version, so a renamed workflow is a rename in the consumer
 repo too.
 
+## v1.0.0 → v2.0.0
+
+`implement-issue` now waits for a human to approve its Implementation Plan
+comment (Step 3) before writing any code, by default. Previously it posted
+the plan and proceeded straight to implementation in the same run.
+
+### What changed
+
+- After the plan comment, the workflow checks the issue for
+  `agent:skip-plan-review`:
+  - **Present** — unchanged: proceeds immediately. This is the old default,
+    now an explicit, human-set opt-in.
+  - **Absent (new default)** — applies `agent:plan-pending-approval`, posts
+    a comment asking for `/approve-plan` or feedback, and stops (`noop`).
+    No branch or PR is created in that run.
+- New trigger: `issue_comment: created`. A comment on an issue labeled
+  `agent:plan-pending-approval`:
+  - Starting with `/approve-plan` → the label is removed and the workflow
+    resumes implementation using the plan already posted.
+  - Anything else → treated as feedback: the plan is revised and reposted;
+    the issue stays `agent:plan-pending-approval`.
+- The workflow never applies `agent:skip-plan-review` itself — a human (or a
+  separate automation a team builds) sets it ahead of time. See
+  [Plan Approval](workflows/implement-issue.md#plan-approval).
+- The PR merge gate is unaffected either way — merging remains entirely
+  human-driven, as it always was.
+
+### What to do
+
+Every existing `agent:implement` consumer stops auto-implementing after the
+plan comment on upgrade, unless `agent:skip-plan-review` is set before the
+plan is posted.
+
+1. `gh aw update RealPage/agentic-workflows/implement-issue` (or
+   `gh aw add RealPage/agentic-workflows/implement-issue@v2.0.0` if not
+   already installed), then `gh aw compile`.
+2. Create the two new labels:
+   ```bash
+   gh label create agent:plan-pending-approval --description "Implementation plan is waiting on human approval" --color "fbca04"
+   gh label create agent:skip-plan-review --description "Skip the plan-approval wait; proceed immediately after posting the plan" --color "0e8a16"
+   ```
+3. If a repo or team has already earned trust in a class of work and wants
+   to keep the previous immediate-implementation behavior, apply
+   `agent:skip-plan-review` to those issues (by hand, for now) before
+   labeling them `agent:implement`. Building an automated labeler for this
+   is a natural next step — see
+   [Plan Approval](workflows/implement-issue.md#plan-approval) for the
+   intended pattern — but is not part of this release.
+
+Issues that had already progressed past the plan comment before the upgrade
+are unaffected; this only changes runs that start fresh after upgrading.
+
 ## v0.7.0 → v1.0.0
 
 Both `tfs-*-mirrored` workflows are gone. The GitHub-mirror clone they existed

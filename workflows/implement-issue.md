@@ -2,7 +2,13 @@
 on:
   issues:
     types: [labeled]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
+  roles: [admin, maintainer, write]
+  # Prevents this workflow's own plan/approval-request/revised-plan comments
+  # (posted as github-actions[bot]) from re-triggering itself on issue_comment.
+  skip-bots: [github-actions]
 
 imports:
   - shared/wif-engine.md
@@ -30,8 +36,10 @@ safe-outputs:
     max: 3
   remove-labels:
     max: 3
-  submit-pull-request-review:
+  hide-comment:
     max: 1
+    allowed-reasons: [outdated]
+    discussions: false
   noop:
 
 ---
@@ -40,6 +48,8 @@ safe-outputs:
 
 You are an implementation agent. When an issue is labeled `agent:implement`, you read the issue, understand the work, write the code, add tests, validate, and open a pull request with a self-review.
 
+By default, a human reviews the Implementation Plan (Step 3) before you touch any code — you post the plan, apply `agent:plan-pending-approval`, and wait for a `/approve-plan` comment (or feedback, which you revise the plan around). Repos that have earned trust in a class of work can skip the wait via the `agent:skip-plan-review` label; see Step 3 for the exact gate.
+
 This workflow is generic — it discovers the project's stack and test commands at runtime so it works in any repo out of the box. Once a team wants tighter, faster runs, they can customize it for their specific codebase; see `docs/workflows/implement-issue.md` for upgrade prompts.
 
 ## Trigger Conditions
@@ -47,6 +57,10 @@ This workflow is generic — it discovers the project's stack and test commands 
 **If triggered by `issues: labeled`:**
 1. Check that the label just added is `agent:implement`. If not, call `noop` and exit.
 2. Check that a PR does not already exist for this issue (search PR titles/bodies for `#<issue_number>`). If one does, add a comment on the issue linking to the existing PR and call `noop`.
+
+**If triggered by `issue_comment: created`:**
+1. Check that the issue carries the `agent:plan-pending-approval` label. If not, this comment isn't for us — call `noop` and exit.
+2. Follow **Step 3b** below instead of starting at Step 1. It decides whether the comment is an approval (resume at Step 4) or feedback (revise the plan and stay pending).
 
 **If triggered by `workflow_dispatch`:**
 1. Find the oldest open issue labeled `agent:implement` that has no linked PR.
@@ -121,7 +135,33 @@ Before writing any code, write a short plan as a comment on the issue:
 **Assumptions:** <anything you inferred that the issue didn't say explicitly>
 ```
 
-This gives humans a chance to redirect you before you write code. Proceed to the next step immediately — don't wait for approval.
+This gives humans a chance to redirect you before you write code. What happens next depends on whether this issue has opted out of waiting:
+
+Check the issue for the `agent:skip-plan-review` label:
+
+- **Present:** An explicit, human-set opt-in for issues or repos that have already earned trust in this class of work. Proceed to Step 4 immediately — this is the old default, preserved as a fast path. This workflow only ever *reads* this label; it is never applied by the workflow itself. See `docs/workflows/implement-issue.md` for how a team sets it.
+- **Absent (the default):** Apply the `agent:plan-pending-approval` label, then post a comment:
+
+  ```markdown
+  Waiting on plan approval before I write any code.
+
+  Comment `/approve-plan` to proceed with the plan above as-is. Any other
+  comment is treated as feedback — I'll revise the plan and post it again,
+  still waiting for `/approve-plan` after that.
+  ```
+
+  Then call `noop` and stop. Do not create a branch, write code, or open a PR in this run — a human needs to weigh in first.
+
+### Step 3b: Handle an Approval or Feedback Comment
+
+Only relevant when this run was triggered by `issue_comment: created` on an issue labeled `agent:plan-pending-approval` (see Trigger Conditions above).
+
+First, find the most recent issue comment whose body starts with `## Implementation Plan` — that's the plan a human is now responding to.
+
+Then classify the new comment: trim its body and compare the **first word** to `/approve-plan`, case-insensitively.
+
+- **First word matches `/approve-plan`** (a clean approval — trailing text like `/approve-plan thanks!` still counts): Remove the `agent:plan-pending-approval` label and resume at **Step 4**, using the plan comment found above. Do not redo the scope check or re-derive the plan — they were already accepted. (Repeating Step 2's discovery is fine and often necessary; this is a fresh runner with no state cached from the earlier run.)
+- **Anything else** (a question, requested changes, or just ambiguous — when in doubt, treat it as feedback, never as a rubber-stamp): This is redirection, not approval. Before posting the revised plan, hide the plan comment found above with `hide-comment` (`comment_id` set to its numeric ID, `reason: "outdated"`) — otherwise a few rounds of feedback leave a wall of full plan comments in the thread with no obvious "current" one. Then re-run Step 1 — the new comment is now part of the issue's comment history, so read it there — and Step 2, then post a revised comment using Step 3's `## Implementation Plan` template only. Do not redo Step 3's label check or re-post its approval-request comment — `agent:plan-pending-approval` is already applied from the first round, and reposting "Waiting on plan approval..." here would just duplicate it. Call `noop` right after posting the revised plan; do not proceed to Step 4 in this run.
 
 ### Step 4: Create a Branch and Implement
 
@@ -223,9 +263,11 @@ Commands run:
 *Opened by the `implement-issue` agent. Review the assumptions section carefully.*
 ```
 
+When calling `create-pull-request`, give it a `temporary_id` (e.g. `aw_pr<issue_number>`) — Step 7 needs it to reference this PR before it has a real number.
+
 ### Step 7: Self-Review
 
-After opening the PR, re-read your own diff with fresh eyes and submit a pull request review (via `submit-pull-request-review` with `event: COMMENT`) whose body is:
+After opening the PR, re-read your own diff with fresh eyes and post a comment on that PR (via `add-comment` with `pr-number` set to the exact `temporary_id` string you gave `create-pull-request` in Step 6, e.g. `aw_pr142` — the bare ID, with no `#` prefix and no other formatting) whose body is:
 
 ```markdown
 ## Self-Review
@@ -244,7 +286,7 @@ After opening the PR, re-read your own diff with fresh eyes and submit a pull re
 - <case>: <why — e.g., "out of scope per issue">
 ```
 
-Use `submit-pull-request-review`, not `add-comment` — the self-review should be a first-class PR review so it shows up in the Reviews tab and notifies subscribers the normal way.
+Use `add-comment` here, not `submit-pull-request-review` — it correctly resolves the PR via its `temporary_id`. See `docs/workflows/implement-issue.md` for why.
 
 Be honest. The purpose of the self-review is to surface the things a human reviewer can't easily see — it is not a victory lap.
 
@@ -271,7 +313,9 @@ Apply label `agent:needs-review` to the PR.
 
 ## Output Requirements
 
-1. **Happy path:** Plan comment on issue → branch + commits → PR with full description → self-review comment → link comment on issue → `agent:needs-review` label on PR.
-2. **Ambiguous issue:** Clarification comment on issue → `agent:needs-clarification` label → `noop`.
-3. **Test failures you can't resolve:** Draft PR with failure details in the description → link comment on issue → `agent:needs-review` label.
-4. **Not a valid trigger** (wrong label, duplicate PR exists): `noop` silently.
+1. **Happy path, plan pending approval (the default):** Plan comment on issue → `agent:plan-pending-approval` label → approval-request comment → `noop`. No branch or PR in this run.
+2. **Happy path, approved via `/approve-plan` or `agent:skip-plan-review`:** (label removed, if it was present) → branch + commits → PR with full description → self-review comment → link comment on issue → `agent:needs-review` label on PR.
+3. **Feedback comment while pending approval:** Revised plan comment on issue → `agent:plan-pending-approval` stays applied → `noop`.
+4. **Ambiguous issue:** Clarification comment on issue → `agent:needs-clarification` label → `noop`.
+5. **Test failures you can't resolve:** Draft PR with failure details in the description → link comment on issue → `agent:needs-review` label.
+6. **Not a valid trigger** (wrong label, duplicate PR exists, comment on an issue without `agent:plan-pending-approval`): `noop` silently.

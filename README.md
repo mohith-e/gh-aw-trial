@@ -74,7 +74,7 @@ Once Path A or Path B has proven the shape works, here's the full set we recomme
 | 1 | [`agent-review-pr`](workflows/agent-review-pr.md) | PR opened (automatic, no label) | Inline review comments + 1-5 scores on correctness, security, patterns | **Comments only** — cannot modify code |
 | 2 | [`agent-generate-tests`](workflows/agent-generate-tests.md) | PR labeled `agent:tests` | Writes tests for the PR's new behavior; pushes commits back to the branch | Tests only — never edits source |
 | 3 | [`agent-refactor`](workflows/agent-refactor.md) | Issue or PR labeled `agent:refactor` | Behavior-preserving refactor of one area per run | Opens a PR; no API changes, no deps changes |
-| 4 | [`implement-issue`](workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, writes code + tests, opens a PR with self-review | Opens a PR; human reviews before merge |
+| 4 | [`implement-issue`](workflows/implement-issue.md) | Issue labeled `agent:implement` | Reads an issue, writes code + tests, opens a PR with self-review | Waits for plan approval by default before touching code; opens a PR; human reviews before merge |
 | 5 | [`fix-failing-tests`](workflows/fix-failing-tests.md) | CI failure on `main`, or issue labeled `agent:fix-tests` | Diagnoses the failing test, fixes code or test, opens a fix PR | Opens a PR; human reviews before merge |
 
 These are ordered **from least to most trust**. A sensible adoption path:
