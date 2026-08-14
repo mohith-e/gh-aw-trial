@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/RealPage/agentic-workflows/compare/v1.0.0...v2.0.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **implement-issue:** implement-issue's default behavior changes for every existing agent:implement consumer — runs stop after the plan comment unless agent:skip-plan-review is set beforehand. See docs/migrations.md for the upgrade steps and new required labels.
+
+### Features
+
+* **implement-issue:** require human plan approval by default, skippable via label ([#145](https://github.com/RealPage/agentic-workflows/issues/145)) ([c017714](https://github.com/RealPage/agentic-workflows/commit/c0177148a04520b680e22138a770b99c0da40c25))
+
 ## [1.0.0](https://github.com/RealPage/agentic-workflows/compare/v0.7.0...v1.0.0) (2026-08-10)
 
 
