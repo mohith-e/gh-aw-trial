@@ -7,22 +7,36 @@
 # copied, or centrally stored — the caller's own already-declared secrets are
 # forwarded into this run.
 #
-# Note this is a plain reusable workflow, deliberately NOT a gh-aw workflow:
+# ── Why this file names no secrets ───────────────────────────────────────────
+# A step-level `env:` mapping cannot dereference a secret whose name is computed
+# at runtime: `${{ secrets[inputs.x] }}` is resolved when the YAML is rendered,
+# so every name would have to appear literally here. That is how a shared hub
+# rots — each new consumer's secret names accumulate in the central file, and
+# the thing that was meant to be maintained once becomes a registry of every
+# repo that ever called it.
+#
+# The way out is to stop treating the secrets as YAML and treat them as data:
+# `toJSON(secrets)` hands the callee the whole inherited set, and the CALLER
+# names which of its own secrets to expose via the `secret_env` input. Names
+# live in the stub, next to the repo that owns them. This file stays generic and
+# never grows a consumer-specific line.
+#
+# ── Why this is a plain reusable workflow, not a gh-aw workflow ──────────────
 #   - gh-aw's compiler owns the `on:` block in a .lock.yml, so a hand-added
 #     `workflow_call` would be clobbered on the next recompile, and the shared
 #     sources under `workflows/` are not reachable by `uses:` at all.
 #   - gh-aw runs Claude Code in a credential-stripped agent container whose
-#     health checks assert that keys are ABSENT. An inherited secret lands in
-#     the job environment, which is where a plain step runs — not inside that
-#     sandbox. Credentialed work belongs here, in a plain step.
+#     health checks assert keys are ABSENT. An inherited secret lands in the job
+#     environment, which is where a plain step runs — not inside that sandbox.
+#     Credentialed work belongs here, in a plain step.
 #
 # A reusable workflow executes in the CALLER's context: `github.repository` is
 # the caller, so a bare `actions/checkout` clones the caller's code.
 #
-# SECURITY: `boot_command` is executed as shell with the caller's inherited
-# secrets in scope. It MUST be hard-coded in the calling stub. A stub must never
-# forward a `workflow_dispatch` input into it — that would be arbitrary code
-# execution against the repo's own credentials.
+# SECURITY: `boot_command` is executed as shell with the resolved secrets in
+# scope. It MUST be hard-coded in the calling stub. A stub must never forward a
+# `workflow_dispatch` input into it — that would be arbitrary code execution
+# against the repo's own credentials.
 name: Agent Runner (hub)
 
 on:
@@ -32,10 +46,20 @@ on:
         description: Opaque id echoed back so a caller can match this run to its request.
         required: true
         type: string
+      secret_env:
+        description: >-
+          Comma-separated names of the CALLER's own inherited secrets to expose
+          to boot_command as environment variables. Names only — values are
+          never passed as inputs. A name the caller does not have resolves to
+          absent and is reported as such rather than failing the run.
+        required: false
+        type: string
+        default: ""
       boot_command:
         description: >-
-          Hard-coded shell to run against the caller's checkout with inherited
-          secrets in scope. Empty skips the boot job. NEVER pass a dispatch input here.
+          Hard-coded shell to run against the caller's checkout with the
+          secret_env variables in scope. Empty skips the boot job.
+          NEVER pass a dispatch input here.
         required: false
         type: string
         default: ""
@@ -49,35 +73,41 @@ permissions:
   contents: read
 
 jobs:
-  # Reports what the callee can actually see. Names are hard-coded because a
-  # reusable workflow cannot dereference an inherited secret by a name computed
-  # at runtime — there is no `secrets[<expr>]` indirection.
+  # Reports what the callee can actually see, for the names the caller asked
+  # about. Presence and length only — never a value.
   probe:
     name: probe (${{ inputs.correlation_id }})
     runs-on: ubuntu-latest
     steps:
-      - name: Report inherited secrets — presence and length only, never values
+      - name: Report requested secrets — presence and length only
         env:
-          P_OPENAI: ${{ secrets.OPENAI_API_KEY }}
-          P_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY }}
-          P_ARTIFACTORY: ${{ secrets.ARTIFACTORY_TOKEN }}
-          # Control. Must come back absent, otherwise the probe is not
-          # discriminating and every other row below is meaningless.
-          P_ABSENT: ${{ secrets.NOT_A_REAL_SECRET_1510 }}
+          # The whole inherited set, as data. Confined to this step: the boot
+          # job re-reads it and narrows to secret_env before anything else runs.
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          SECRET_ENV: ${{ inputs.secret_env }}
         run: |
+          set -euo pipefail
           {
-            echo "### Inherited secrets"
+            echo "### Requested secrets"
             echo
-            echo "| name | resolved | length |"
-            echo "|---|---|---|"
-            for n in P_OPENAI P_ANTHROPIC P_ARTIFACTORY P_ABSENT; do
-              v="${!n}"
-              if [ -n "$v" ]; then
-                echo "| ${n#P_} | yes | ${#v} |"
-              else
-                echo "| ${n#P_} | no | 0 |"
-              fi
-            done
+            if [ -z "$SECRET_ENV" ]; then
+              echo "_None requested (\`secret_env\` empty)._"
+            else
+              echo "| name | resolved | length |"
+              echo "|---|---|---|"
+              printf '%s' "$SECRET_ENV" | tr ',' '\n' | while read -r name; do
+                name="$(printf '%s' "$name" | tr -d '[:space:]')"
+                [ -z "$name" ] && continue
+                len=$(jq -r --arg n "$name" '(.[$n] // "") | length' <<<"$ALL_SECRETS")
+                if [ "$len" -gt 0 ]; then
+                  echo "| $name | yes | $len |"
+                else
+                  echo "| $name | no | 0 |"
+                fi
+              done
+            fi
+            echo
+            echo "Total names in the inherited set: $(jq -r 'keys | length' <<<"$ALL_SECRETS")"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -110,13 +140,12 @@ jobs:
             echo "| github.workflow_ref | \`${{ github.workflow_ref }}\` |"
             echo "| github.event_name | \`${{ github.event_name }}\` |"
             echo "| github.triggering_actor | \`${{ github.triggering_actor }}\` |"
-            echo "| github.run_id | \`${{ github.run_id }}\` |"
             echo "| boot_command set | ${{ inputs.boot_command != '' }} |"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The credentialed work. This is the half that has to succeed for the pattern
-  # to be worth anything: presence of a secret is not proof it is live.
+  # to be worth anything: presence of a secret is not proof that it is live.
   boot:
     name: boot (${{ inputs.correlation_id }})
     if: inputs.boot_command != ''
@@ -131,20 +160,39 @@ jobs:
         with:
           enable-cache: true
 
+      # Narrows the inherited set to exactly what the caller asked for and hands
+      # those on via $GITHUB_ENV. ALL_SECRETS is scoped to this step alone, so
+      # the step that runs caller-supplied shell never has the full set in its
+      # environment. Each value is masked before it can reach a log.
+      - name: Resolve requested secrets
+        if: inputs.secret_env != ''
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          SECRET_ENV: ${{ inputs.secret_env }}
+        run: |
+          set -euo pipefail
+          for name in $(printf '%s' "$SECRET_ENV" | tr ',' ' '); do
+            [ -z "$name" ] && continue
+            value=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$ALL_SECRETS")
+            if [ -z "$value" ]; then
+              echo "::warning::$name not present in the inherited set; exporting empty"
+            else
+              echo "::add-mask::$value"
+            fi
+            # Delimiter form, so a multi-line value (an SSH key, say) survives.
+            {
+              echo "$name<<__GH_AW_EOF_${name}"
+              printf '%s\n' "$value"
+              echo "__GH_AW_EOF_${name}"
+            } >> "$GITHUB_ENV"
+          done
+
       - name: Run boot command
         working-directory: ${{ inputs.working_directory }}
         env:
           # Passed through env rather than interpolated into the script body, so
           # the command text can never be spliced into this step's shell source.
           BOOT_COMMAND: ${{ inputs.boot_command }}
-          # Fixed set, for the same reason the probe's names are fixed: a
-          # reusable workflow cannot dereference an inherited secret by a name
-          # computed at runtime. Absent secrets resolve to empty strings, so
-          # listing a name a caller does not have is harmless. Generalising this
-          # is a rollout question, not a spike question.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
           echo "::group::boot_command"
