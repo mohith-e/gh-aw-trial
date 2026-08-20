@@ -112,17 +112,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report vars resolution
+        env:
+          # `secrets: inherit` covers secrets only, so whether the `vars`
+          # context reads the CALLER's org/repo variables is a separate
+          # question. Reported by listing the names actually present rather
+          # than checking a fixed list — a fixed list would put consumer
+          # specifics back into this file, and var names are not secret.
+          ALL_VARS: ${{ toJSON(vars) }}
         run: |
-          # `secrets: inherit` covers secrets only. This settles empirically
-          # whether the `vars` context reads the CALLER's org/repo variables.
+          set -euo pipefail
           {
-            echo "### vars context (caller's variables?)"
+            echo "### vars context (whose variables reach the callee?)"
             echo
-            echo "| var | resolved |"
-            echo "|---|---|"
-            echo "| ANTHROPIC_FEDERATION_RULE_ID | ${{ vars.ANTHROPIC_FEDERATION_RULE_ID != '' }} |"
-            echo "| ANTHROPIC_SERVICE_ACCOUNT_ID | ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID != '' }} |"
-            echo "| ELASTIC_ESQL_URL | ${{ vars.ELASTIC_ESQL_URL != '' }} |"
+            echo "Names visible: $(jq -r 'keys | length' <<<"$ALL_VARS")"
+            echo
+            jq -r 'keys[] | "- `\(.)`"' <<<"$ALL_VARS"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
