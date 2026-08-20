@@ -1,0 +1,156 @@
+# Hub-and-Spoke Agent Dispatch — the "hub" half.
+#
+# SPIKE (RealPage/ai-internal-enablement#1510). Not a supported entrypoint yet.
+#
+# A repo keeps its Actions secrets exactly where they are and adds a thin stub
+# workflow that calls this one with `secrets: inherit`. Nothing is migrated,
+# copied, or centrally stored — the caller's own already-declared secrets are
+# forwarded into this run.
+#
+# Note this is a plain reusable workflow, deliberately NOT a gh-aw workflow:
+#   - gh-aw's compiler owns the `on:` block in a .lock.yml, so a hand-added
+#     `workflow_call` would be clobbered on the next recompile, and the shared
+#     sources under `workflows/` are not reachable by `uses:` at all.
+#   - gh-aw runs Claude Code in a credential-stripped agent container whose
+#     health checks assert that keys are ABSENT. An inherited secret lands in
+#     the job environment, which is where a plain step runs — not inside that
+#     sandbox. Credentialed work belongs here, in a plain step.
+#
+# A reusable workflow executes in the CALLER's context: `github.repository` is
+# the caller, so a bare `actions/checkout` clones the caller's code.
+#
+# SECURITY: `boot_command` is executed as shell with the caller's inherited
+# secrets in scope. It MUST be hard-coded in the calling stub. A stub must never
+# forward a `workflow_dispatch` input into it — that would be arbitrary code
+# execution against the repo's own credentials.
+name: Agent Runner (hub)
+
+on:
+  workflow_call:
+    inputs:
+      correlation_id:
+        description: Opaque id echoed back so a caller can match this run to its request.
+        required: true
+        type: string
+      boot_command:
+        description: >-
+          Hard-coded shell to run against the caller's checkout with inherited
+          secrets in scope. Empty skips the boot job. NEVER pass a dispatch input here.
+        required: false
+        type: string
+        default: ""
+      working_directory:
+        description: Directory within the caller's checkout to run boot_command in.
+        required: false
+        type: string
+        default: "."
+
+permissions:
+  contents: read
+
+jobs:
+  # Reports what the callee can actually see. Names are hard-coded because a
+  # reusable workflow cannot dereference an inherited secret by a name computed
+  # at runtime — there is no `secrets[<expr>]` indirection.
+  probe:
+    name: probe (${{ inputs.correlation_id }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report inherited secrets — presence and length only, never values
+        env:
+          P_OPENAI: ${{ secrets.OPENAI_API_KEY }}
+          P_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY }}
+          P_ARTIFACTORY: ${{ secrets.ARTIFACTORY_TOKEN }}
+          # Control. Must come back absent, otherwise the probe is not
+          # discriminating and every other row below is meaningless.
+          P_ABSENT: ${{ secrets.NOT_A_REAL_SECRET_1510 }}
+        run: |
+          {
+            echo "### Inherited secrets"
+            echo
+            echo "| name | resolved | length |"
+            echo "|---|---|---|"
+            for n in P_OPENAI P_ANTHROPIC P_ARTIFACTORY P_ABSENT; do
+              v="${!n}"
+              if [ -n "$v" ]; then
+                echo "| ${n#P_} | yes | ${#v} |"
+              else
+                echo "| ${n#P_} | no | 0 |"
+              fi
+            done
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report vars resolution
+        run: |
+          # `secrets: inherit` covers secrets only. This settles empirically
+          # whether the `vars` context reads the CALLER's org/repo variables.
+          {
+            echo "### vars context (caller's variables?)"
+            echo
+            echo "| var | resolved |"
+            echo "|---|---|"
+            echo "| ANTHROPIC_FEDERATION_RULE_ID | ${{ vars.ANTHROPIC_FEDERATION_RULE_ID != '' }} |"
+            echo "| ANTHROPIC_SERVICE_ACCOUNT_ID | ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID != '' }} |"
+            echo "| ELASTIC_ESQL_URL | ${{ vars.ELASTIC_ESQL_URL != '' }} |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report caller context
+        run: |
+          {
+            echo "### Caller context"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| correlation_id | \`${{ inputs.correlation_id }}\` |"
+            echo "| github.repository | \`${{ github.repository }}\` |"
+            echo "| github.ref | \`${{ github.ref }}\` |"
+            echo "| github.sha | \`${{ github.sha }}\` |"
+            echo "| github.workflow_ref | \`${{ github.workflow_ref }}\` |"
+            echo "| github.event_name | \`${{ github.event_name }}\` |"
+            echo "| github.triggering_actor | \`${{ github.triggering_actor }}\` |"
+            echo "| github.run_id | \`${{ github.run_id }}\` |"
+            echo "| boot_command set | ${{ inputs.boot_command != '' }} |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The credentialed work. This is the half that has to succeed for the pattern
+  # to be worth anything: presence of a secret is not proof it is live.
+  boot:
+    name: boot (${{ inputs.correlation_id }})
+    if: inputs.boot_command != ''
+    runs-on: ubuntu-latest
+    steps:
+      # No `repository:` — a reusable workflow runs in the caller's context, so
+      # this clones the CALLER's code at the ref that triggered the stub.
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Run boot command
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          # Passed through env rather than interpolated into the script body, so
+          # the command text can never be spliced into this step's shell source.
+          BOOT_COMMAND: ${{ inputs.boot_command }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::group::boot_command"
+          printf '%s\n' "$BOOT_COMMAND"
+          echo "::endgroup::"
+          bash -c "$BOOT_COMMAND"
+
+      - name: Record outcome
+        if: always()
+        run: |
+          {
+            echo "### Boot (\`${{ inputs.correlation_id }}\`)"
+            echo
+            echo "Outcome: **${{ job.status }}**"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
