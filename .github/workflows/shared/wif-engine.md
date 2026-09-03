@@ -17,10 +17,6 @@
 #   - `engine.env` — no import-compatible equivalent; `sandbox.agent.env` is
 #     refused by strict mode as an internal implementation detail, so such a
 #     workflow must keep the whole `engine:` block inline.
-#
-# This is the in-.github mirror of the canonical workflows/shared/wif-engine.md,
-# needed because gh-aw resolves imports relative to the importing file within
-# .github/. Keep the two in sync.
 engine:
   id: claude
   auth:
