@@ -10,7 +10,9 @@ name: dcs - syntax gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # ready_for_review matters: without it, a PR this gate drafted could be flipped back to
+    # ready by hand and merged without the gate ever running again.
+    types: [opened, synchronize, reopened, ready_for_review]
     # TRIAL-REPO DIVERGENCE: `main` added because gh-aw-trial's default branch is main.
     # This is the only edit to this file for the trial; remove `main` before the real repo.
     branches: [main, master, pipeline_issues]
@@ -96,6 +98,91 @@ jobs:
           name: dcs-validation-report
           path: dcs-parsing/dcs_process_1/validation-report.json
           if-no-files-found: warn
+
+  enforce:
+    name: enforce the gate
+    needs: syntax
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      # Why this job exists: a failing check does not stop a merge. Until an admin adds
+      # "syntax (validate.py)" as a REQUIRED status check, GitHub reports the red circle and
+      # leaves the merge button working (observed: a PR with a failing gate still reported
+      # mergeable=MERGEABLE, state=UNSTABLE). Delete this job once the required check exists.
+      #
+      # Converting the PR to a draft was tried first and is NOT possible: the Actions token
+      # cannot call convertPullRequestToDraft ("Resource not accessible by integration") even
+      # with pull-requests: write, and buying that with a stored PAT is the credential pattern
+      # being retired. A changes-requested review is something the token CAN do, and master
+      # already requires a review -- so a pending changes-request sets reviewDecision to
+      # CHANGES_REQUESTED and GitHub blocks the merge until it is resolved. The gate never
+      # approves; it can only ever make merging harder, never easier.
+      - name: Block or unblock the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RESULT: ${{ needs.syntax.result }}
+        run: |
+          set -euo pipefail
+
+          gh label create gate-blocked  --repo "$REPO" --color B60205 \
+            --description "The dcs syntax gate is holding this PR; clears when the gate passes" 2>/dev/null || true
+          gh label create gate-override --repo "$REPO" --color FBCA04 \
+            --description "Stand the dcs syntax gate down for this PR" 2>/dev/null || true
+
+          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+          has() { printf '%s' ",$LABELS," | grep -q ",$1,"; }
+
+          # The gate's own still-active changes-request, if any.
+          OURS=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+                   --jq '[.[] | select(.user.login=="github-actions[bot]" and .state=="CHANGES_REQUESTED")] | last | .id // empty')
+
+          # Anything other than a clean pass counts as a failure, including the gate's own
+          # self-test failing. A gate that cannot vouch for itself should not wave PRs through.
+          if [ "$RESULT" = "success" ]; then
+            if [ -n "$OURS" ]; then
+              gh api -X PUT "repos/$REPO/pulls/$PR/reviews/$OURS/dismissals" \
+                -f message="The dcs syntax gate passes now." -f event=DISMISS >/dev/null
+              gh pr edit "$PR" --repo "$REPO" --remove-label gate-blocked 2>/dev/null || true
+              echo "unblocked: gate green, changes-request dismissed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "nothing to do: gate green" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          if has gate-override; then
+            WHO=$(gh api "repos/$REPO/issues/$PR/timeline" --paginate \
+                    --jq '[.[] | select(.event=="labeled" and .label.name=="gate-override")] | last
+                          | "@\(.actor.login) on \(.created_at)"' 2>/dev/null || echo "someone")
+            if [ -n "$OURS" ]; then
+              gh api -X PUT "repos/$REPO/pulls/$PR/reviews/$OURS/dismissals" \
+                -f message="Overridden by $WHO via the gate-override label." -f event=DISMISS >/dev/null
+            fi
+            gh pr edit "$PR" --repo "$REPO" --remove-label gate-blocked 2>/dev/null || true
+            if ! gh pr view "$PR" --repo "$REPO" --json comments \
+                 --jq '[.comments[].body] | join("")' | grep -q 'dcs-gate-override'; then
+              gh pr comment "$PR" --repo "$REPO" --body \
+                "<!-- dcs-gate-override --> The dcs syntax gate is failing and has been **overridden** by $WHO via the \`gate-override\` label. The failing check stays visible above."
+            fi
+            echo "stood down: overridden by $WHO" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh pr edit "$PR" --repo "$REPO" --add-label gate-blocked 2>/dev/null || true
+          if [ -n "$OURS" ]; then
+            echo "already blocked; leaving the existing changes-request in place" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh pr review "$PR" --repo "$REPO" --request-changes --body \
+            '<!-- dcs-gate-blocked --> The dcs syntax gate failed, so this pull request cannot be merged. See the `syntax (validate.py)` check for the failing files. Push a fix and this will be dismissed automatically. To proceed anyway, add the `gate-override` label -- the override is recorded on the pull request.'
+          echo "blocked: changes requested" >> "$GITHUB_STEP_SUMMARY"
 
   ai-diagnosis:
     name: AI diagnosis (advisory)
