@@ -10,7 +10,9 @@ name: dcs - syntax gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # ready_for_review matters: without it, a PR this gate drafted could be flipped back to
+    # ready by hand and merged without the gate ever running again.
+    types: [opened, synchronize, reopened, ready_for_review]
     # TRIAL-REPO DIVERGENCE: `main` added because gh-aw-trial's default branch is main.
     # This is the only edit to this file for the trial; remove `main` before the real repo.
     branches: [main, master, pipeline_issues]
@@ -96,6 +98,86 @@ jobs:
           name: dcs-validation-report
           path: dcs-parsing/dcs_process_1/validation-report.json
           if-no-files-found: warn
+
+  enforce:
+    name: enforce the gate
+    needs: syntax
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      # Why this job exists: a failing check does not stop a merge. Until an admin adds
+      # "syntax (validate.py)" as a REQUIRED status check, GitHub reports the red circle and
+      # leaves the merge button working (observed: a PR with a failing gate still reported
+      # mergeable=MERGEABLE, state=UNSTABLE). A draft pull request cannot be merged at all,
+      # whatever the protection settings are, so drafting is the one block available without
+      # repository admin. Delete this job once the required check is in place.
+      - name: Block or unblock the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RESULT: ${{ needs.syntax.result }}
+          WAS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+
+          # Labels have to exist before they can be applied; creating them is idempotent.
+          gh label create gate-blocked  --repo "$REPO" --color B60205 \
+            --description "Drafted by the dcs syntax gate; clears itself when the gate passes" 2>/dev/null || true
+          gh label create gate-override --repo "$REPO" --color FBCA04 \
+            --description "Stand the dcs syntax gate down for this PR" 2>/dev/null || true
+
+          LABELS=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+          has() { printf '%s' ",$LABELS," | grep -q ",$1,"; }
+
+          # Anything other than a clean pass is treated as a failure, including the gate's own
+          # self-test failing or the job erroring. A gate that cannot vouch for itself should
+          # not be waving pull requests through.
+          if [ "$RESULT" = "success" ]; then
+            if has gate-blocked; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label gate-blocked
+              gh pr ready "$PR" --repo "$REPO"
+              gh pr comment "$PR" --repo "$REPO" --body \
+                '<!-- dcs-gate-blocked --> The dcs syntax gate passes now. This pull request has been taken out of draft.'
+              echo "unblocked: gate green" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "nothing to do: gate green, not blocked by this gate" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          if has gate-override; then
+            WHO=$(gh api "repos/$REPO/issues/$PR/timeline" --paginate \
+                    --jq '[.[] | select(.event=="labeled" and .label.name=="gate-override")] | last
+                          | "@\(.actor.login) on \(.created_at)"' 2>/dev/null || echo "someone")
+            echo "gate failing, but overridden by $WHO" >> "$GITHUB_STEP_SUMMARY"
+            # One notice per pull request, not one per push.
+            if ! gh pr view "$PR" --repo "$REPO" --json comments \
+                 --jq '[.comments[].body] | join("")' | grep -q 'dcs-gate-override'; then
+              gh pr comment "$PR" --repo "$REPO" --body \
+                "<!-- dcs-gate-override --> The dcs syntax gate is failing on this pull request and has been **overridden** by $WHO via the \`gate-override\` label. It will not be drafted. The failing check remains visible above."
+            fi
+            exit 0
+          fi
+
+          # Already a draft: it cannot be merged, so there is nothing to block. Deliberately no
+          # label either -- the label is what tells this job the draft is ITS doing, and marking
+          # somebody's own work-in-progress as ready later would be worse than not helping.
+          if [ "$WAS_DRAFT" = "true" ]; then
+            echo "gate failing; PR is already a draft, leaving it alone" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh pr ready "$PR" --repo "$REPO" --undo
+          gh pr edit "$PR" --repo "$REPO" --add-label gate-blocked
+          gh pr comment "$PR" --repo "$REPO" --body \
+            '<!-- dcs-gate-blocked --> The dcs syntax gate failed, so this pull request has been **converted to a draft** and cannot be merged. See the `syntax (validate.py)` check above for the failing files. Push a fix and it will be taken out of draft automatically. To proceed anyway, add the `gate-override` label and mark it ready yourself -- the override is recorded on the pull request.'
+          echo "blocked: converted to draft" >> "$GITHUB_STEP_SUMMARY"
 
   ai-diagnosis:
     name: AI diagnosis (advisory)
