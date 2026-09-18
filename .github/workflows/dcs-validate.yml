@@ -129,6 +129,10 @@ jobs:
         working-directory: dcs-parsing/dcs_process_1
         env:
           DCS_TARGET_PYTHON: python
+          # TRIAL-REPO DIVERGENCE: federation rules are scoped to the repository they
+          # were issued for, so the real backend cannot authenticate here. This stub
+          # exercises the same code path. Remove before the real repo.
+          DCS_VALIDATOR_AI_CMD: python3 ai_stub.py
           # Workload Identity Federation, not a stored key: personal/static ANTHROPIC_API_KEY
           # secrets are being retired org-wide. Same repo-level vars the dcs-tfs-implement
           # agentic workflow already uses -- no new provisioning needed. If these vars are ever
