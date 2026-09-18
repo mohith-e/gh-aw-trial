@@ -1,5 +1,5 @@
-"""Was deliberately broken; now fixed, to prove the block clears itself."""
+"""Broken again, with gate-override applied: the gate should stand down."""
 
 
-def parse(rows):
+def parse(rows)
     return rows
