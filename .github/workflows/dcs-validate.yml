@@ -1,0 +1,218 @@
+# PR gate for the dcs_process_1 parsing tier.
+#
+# Deliberately absent: this workflow never merges, approves, deploys, tags, or pushes anything.
+# The AI job comments only -- GitHub counts a bot approval toward branch protection, so an
+# approving bot would defeat the human review it is supposed to support.
+#
+# Make required (later, in Settings > Branches): the "syntax (validate.py)" check only.
+# See CICD_DESIGN.md section 3b for why the regression suite is not a required check yet.
+name: dcs - syntax gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # TRIAL-REPO DIVERGENCE: `main` added because gh-aw-trial's default branch is main.
+    # This is the only edit to this file for the trial; remove `main` before the real repo.
+    branches: [main, master, pipeline_issues]
+    paths:
+      - 'dcs-parsing/dcs_process_1/**'
+      - '.github/workflows/dcs-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dcs-validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: syntax (validate.py)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      failed: ${{ steps.gate.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # validate.py diffs against the base ref and walks history to find a rollback target,
+          # so a shallow clone would silently reduce what it can report.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          # The tier pins 3.9.15 (.python-version). Patch releases within 3.9 do not change
+          # what the parser accepts, which is all this job depends on.
+          python-version: '3.9'
+
+      # No pipeline dependencies are installed, on purpose. validate.py is stdlib-only and only
+      # compiles source, so this required check cannot go red for reasons unrelated to the change
+      # -- psycopg2 wanting libpq, xlwings wanting Excel, or a pandas 1.5.0 wheel missing for a
+      # given runner image. Anything needing those belongs in the informational job below.
+      # The gate's own regression tests. Stdlib only, so this keeps the required check free of
+      # pipeline dependencies. They cover the ways validate.py behaves differently under the
+      # pre-push hook than it does here -- differences CI cannot otherwise see, because CI is
+      # the environment they do not happen in.
+      - name: Self-test the gate
+        working-directory: dcs-parsing/dcs_process_1
+        run: python3 test_validate_gate.py
+
+      - name: Run the syntax gate
+        id: gate
+        working-directory: dcs-parsing/dcs_process_1
+        env:
+          # Pin the interpreter explicitly: CI has no .venv and no pyenv, and a silent fallback
+          # to the runner's default python is exactly the failure mode this gate exists to catch.
+          DCS_TARGET_PYTHON: python
+        run: |
+          set -o pipefail
+          BASE="origin/${{ github.event.pull_request.base.ref || github.ref_name }}"
+          echo "Comparing against $BASE"
+          STATUS=0
+          # --no-ai keeps the required check deterministic and credential-free; the AI runs in
+          # the advisory job so a model outage can never block a PR.
+          # --require-pinned-interpreter: if the runner ever stops providing 3.9, fail loudly
+          # instead of quietly validating against the wrong Python, which is the whole point.
+          python3 validate.py --base "$BASE" --no-ai --require-pinned-interpreter \
+            --report validation-report.json | tee gate.txt || STATUS=$?
+          {
+            echo '### dcs syntax gate'
+            echo ''
+            echo '```'
+            cat gate.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATUS" -eq 0 ]; then
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$STATUS"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dcs-validation-report
+          path: dcs-parsing/dcs_process_1/validation-report.json
+          if-no-files-found: warn
+
+  ai-diagnosis:
+    name: AI diagnosis (advisory)
+    needs: syntax
+    # Only when the parser actually found something. Nothing to explain on a green PR, and no
+    # reason to spend a model call on one.
+    if: always() && needs.syntax.outputs.failed == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+      # Required so GitHub mints the OIDC token the Anthropic SDK exchanges for a short-lived
+      # credential -- WIF, no stored key. See the Anthropic auth block below.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install the AI backend
+        working-directory: dcs-parsing/dcs_process_1
+        run: pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Diagnose
+        working-directory: dcs-parsing/dcs_process_1
+        env:
+          DCS_TARGET_PYTHON: python
+          # Workload Identity Federation, not a stored key: personal/static ANTHROPIC_API_KEY
+          # secrets are being retired org-wide. Same repo-level vars the dcs-tfs-implement
+          # agentic workflow already uses -- no new provisioning needed. If these vars are ever
+          # unset, ai_backend() in validate.py has no credential signal and the run still
+          # succeeds: it degrades to the rule-based diagnosis and the comment below says so.
+          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+        run: |
+          BASE="origin/${{ github.event.pull_request.base.ref }}"
+          python3 validate.py --base "$BASE" --no-report > diagnosis.txt 2>&1 || true
+          {
+            echo '## dcs syntax gate: failures found'
+            echo ''
+            echo 'Deterministic diagnosis plus, where a backend was reachable, an AI explanation'
+            echo 'and suggested fix. The AI is advisory -- it did not decide this verdict.'
+            echo ''
+            echo '```'
+            cat diagnosis.txt
+            echo '```'
+            echo ''
+            echo '<sub>Restore the last compiling version of a file with'
+            echo '`python3 validate.py --rollback --files <path>` (your broken copy is saved first).</sub>'
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post the diagnosis on the PR
+        working-directory: dcs-parsing/dcs_process_1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md
+
+  tests:
+    name: regression tests (informational)
+    # Off until a repo variable turns it on. As of 2026-09-10 this suite has 2 real failures on
+    # the branch and 7 tests that read fixtures from one developer's ~/Downloads, so it would be
+    # permanently red here and would teach everyone to ignore it. CICD_DESIGN.md section 3b has
+    # the prerequisites for promoting it to a required check.
+    if: vars.DCS_RUN_TESTS == 'true'
+    needs: syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: System packages for the pinned deps
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+
+      - name: Install pinned pipeline deps
+        working-directory: dcs-parsing/dcs_process_1
+        run: pip install --disable-pip-version-check -r requirement.txt
+
+      - name: Run the regression gate
+        working-directory: dcs-parsing/dcs_process_1
+        env:
+          DCS_TARGET_PYTHON: python
+        run: python3 run_pre_merge_tests.py --base "origin/${{ github.event.pull_request.base.ref || github.ref_name }}"
+
+  dependency-pins:
+    name: dependency pins (informational)
+    # Informational, not required: 7 distributions are missing today (python-dateutil,
+    # dateparser, PyPDF2, tensorflow, transformers, datasets, psutil) and none can be pinned to
+    # a correct version from here -- that has to be the exact version already installed on the
+    # legacy box's dcs_env, not a guess. Promote to required once requirement.txt is fixed.
+    # See CICD_DESIGN.md sec 3c.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deliberately NOT 3.9 (the tier's pinned interpreter): this check classifies imports by
+      # name via sys.stdlib_module_names, which needs 3.10+, and it never compiles or runs
+      # pipeline code, so the tier pin does not apply. The syntax job above is unaffected.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Every third-party import has a requirement.txt pin
+        working-directory: dcs-parsing/dcs_process_1
+        run: python3 validate.py --check-pins
