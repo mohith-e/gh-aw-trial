@@ -1,5 +1,5 @@
-"""Deliberately broken, to make the gate fail so the enforcement path runs."""
+"""Was deliberately broken; now fixed, to prove the block clears itself."""
 
 
-def parse(rows)
+def parse(rows):
     return rows
