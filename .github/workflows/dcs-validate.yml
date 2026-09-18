@@ -67,14 +67,25 @@ jobs:
           DCS_TARGET_PYTHON: python
         run: |
           set -o pipefail
-          BASE="origin/${{ github.event.pull_request.base.ref || github.ref_name }}"
-          echo "Comparing against $BASE"
+          # A dispatch has no base to diff against: `origin/<ref>` IS the ref, so a changed-file
+          # run compares the branch with itself, checks zero files and prints "PASS: no syntax
+          # errors". Someone running this by hand to check the tier would get an all-clear that
+          # inspected nothing. There is no "change" to scope a manual run to, so it checks
+          # everything. (dcs-release.yml already passes --all for the same reason.)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SCOPE="--all"
+            echo "Dispatch run: checking every file in the tier"
+          else
+            BASE="origin/${{ github.event.pull_request.base.ref || github.ref_name }}"
+            SCOPE="--base $BASE"
+            echo "Comparing against $BASE"
+          fi
           STATUS=0
           # --no-ai keeps the required check deterministic and credential-free; the AI runs in
           # the advisory job so a model outage can never block a PR.
           # --require-pinned-interpreter: if the runner ever stops providing 3.9, fail loudly
           # instead of quietly validating against the wrong Python, which is the whole point.
-          python3 validate.py --base "$BASE" --no-ai --require-pinned-interpreter \
+          python3 validate.py $SCOPE --no-ai --require-pinned-interpreter \
             --report validation-report.json | tee gate.txt || STATUS=$?
           {
             echo '### dcs syntax gate'
