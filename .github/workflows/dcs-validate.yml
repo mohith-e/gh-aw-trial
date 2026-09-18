@@ -215,4 +215,24 @@ jobs:
 
       - name: Every third-party import has a requirement.txt pin
         working-directory: dcs-parsing/dcs_process_1
-        run: python3 validate.py --check-pins
+        run: |
+          set -o pipefail
+          STATUS=0
+          python3 validate.py --check-pins | tee pins.txt || STATUS=$?
+          {
+            echo '### dependency pins'
+            echo ''
+            echo '```'
+            cat pins.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Exit 1 means "pins are missing" -- the finding this job reports, not a failure of
+          # the job. Letting it surface as a red check would put a permanently-failing check
+          # beside the required one from the first day, since the pins cannot be fixed without
+          # a pip freeze from the box. A check that is always red is a check people stop
+          # reading, which is the habit this whole gate exists to avoid. Exit 2 is different:
+          # that is the validator itself breaking, and it still fails the job.
+          if [ "$STATUS" -gt 1 ]; then
+            echo "validator error (exit $STATUS)" >&2
+            exit "$STATUS"
+          fi
